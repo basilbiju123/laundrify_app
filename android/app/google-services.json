@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "875682938754",
+    "firebase_url": "https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "laundrify-d34c0",
+    "storage_bucket": "laundrify-d34c0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:875682938754:android:8d696f8ae7fb3d4716d99b",
+        "android_client_info": {
+          "package_name": "com.example.laundrify"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "875682938754-7i32s88lp4em4q4qc5c0k3n62o589qv2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.laundrify",
+            "certificate_hash": "f30145eb7b7a115a3c45a97c3da5acdf9888603e"
+          }
+        },
+        {
+          "client_id": "875682938754-talrc6194jmkifovatu214meph4u0902.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPje5B76OXD72A4LlHS5qpYTQB-zPxEGc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "875682938754-talrc6194jmkifovatu214meph4u0902.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "875682938754-9bndimhr387tl415blbla1dj91gbsnl1.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.lundrify"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
