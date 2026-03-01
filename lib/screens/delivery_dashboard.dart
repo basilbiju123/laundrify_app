@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
+import 'auth_options_page.dart';
 
 // ═══════════════════════════════════════════════════════════
 // DELIVERY DESIGN TOKENS — Gold + Dark Navy (matches app theme)
@@ -1278,7 +1279,10 @@ class _ProfileTabState extends State<_ProfileTab> {
   Future<void> _logout() async {
     await _auth.signOut();
     if (!mounted) return;
-    Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+      (_) => false,
+    );
   }
 
   @override

@@ -137,6 +137,7 @@ class AuthService {
           'photoUrl': user.photoURL ?? '',
           'createdAt': FieldValue.serverTimestamp(),
           'authMethod': 'google',
+          'role': 'user',
         });
       } else {
         await _db.collection('users').doc(user.uid).update({
@@ -162,6 +163,7 @@ class AuthService {
           'uid': user.uid, 'name': name, 'email': email, 'phone': '',
           'phoneVerified': false, 'emailVerified': false,
           'createdAt': FieldValue.serverTimestamp(), 'authMethod': 'email',
+          'role': 'user',
         });
       }
       return user;
@@ -213,6 +215,7 @@ class AuthService {
           'uid': user.uid, 'name': user.displayName ?? '', 'email': user.email ?? '',
           'phone': user.phoneNumber ?? '', 'phoneVerified': true, 'emailVerified': false,
           'createdAt': FieldValue.serverTimestamp(), 'authMethod': 'phone',
+          'role': 'user',
         });
       } else {
         await _db.collection('users').doc(user.uid).update(

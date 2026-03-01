@@ -9,6 +9,7 @@ import 'screens/dashboard.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/manager_dashboard.dart';
 import 'screens/delivery_dashboard.dart';
+import 'screens/employee_dashboard.dart';
 import 'models/firestore_models.dart';
 import 'services/role_based_auth_service.dart';
 
@@ -149,6 +150,8 @@ class _AppEntryPointState extends State<AppEntryPoint> {
         return const ManagerDashboard();
       case '/delivery-dashboard':
         return const DeliveryDashboard();
+      case '/employee-dashboard':
+        return const EmployeeDashboard();
       case '/dashboard':
       default:
         return const DashboardPage();

@@ -383,16 +383,12 @@ class _AdminDashboardState extends State<AdminDashboard>
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [AdminTheme.gold, AdminTheme.accent]),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Center(
-                  child: Text('L',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 18))),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.asset('assets/images/logo.png', fit: BoxFit.cover),
+              ),
             ),
             const SizedBox(width: 10),
             const Column(
@@ -503,7 +499,12 @@ class _AdminDashboardState extends State<AdminDashboard>
             GestureDetector(
               onTap: () async {
                 await _auth.signOut();
-                if (mounted) Navigator.pushReplacementNamed(context, '/login');
+                if (mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                    (r) => false,
+                  );
+                }
               },
               child: const Icon(Icons.logout_rounded,
                   color: AdminTheme.rose, size: 16),

@@ -99,12 +99,15 @@ class OrderService {
     if (uid == null) return Stream.value([]);
 
     return _db
-        .collection('users')
-        .doc(uid)
         .collection('orders')
+        .where('userId', isEqualTo: uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => d.data()).toList());
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['id'] = d.id;
+              return data;
+            }).toList());
   }
 }
 
@@ -124,11 +127,15 @@ class OrderHistoryPage extends StatefulWidget {
 
 class _OrderHistoryPageState extends State<OrderHistoryPage> {
   String _filter = "All";
-  final _filters = ["All", "Confirmed", "Processing", "Completed", "Cancelled", "Failed"];
+  final _filters = ["All", "Pending", "Confirmed", "Processing", "Completed", "Cancelled"];
 
   List<Map<String, dynamic>> _filterOrders(List<Map<String, dynamic>> all) {
     if (_filter == "All") return all;
-    return all.where((o) => (o['status'] ?? '') == _filter).toList();
+    return all.where((o) {
+      final status = ((o['status'] ?? '') as String).toLowerCase();
+      final filterLower = _filter.toLowerCase();
+      return status == filterLower;
+    }).toList();
   }
 
   @override
@@ -222,7 +229,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                         final isSel = _filter == f;
                         final count = f == "All"
                             ? allOrders.length
-                            : allOrders.where((o) => o['status'] == f).length;
+                            : allOrders.where((o) => ((o['status'] ?? '') as String).toLowerCase() == f.toLowerCase()).length;
                         return Padding(
                           padding: const EdgeInsets.only(right: 10),
                           child: GestureDetector(
@@ -455,54 +462,281 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
           ]),
         ),
 
-        // ── Total + Download button ──────────────────────────
+        // ── Total + Action buttons ──────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          child: Row(children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text("Total Paid",
-                  style: TextStyle(fontSize: 11, color: _hFade)),
-              const SizedBox(height: 2),
-              Text("₹${total.toStringAsFixed(2)}",
-                  style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      color: _hDark)),
-            ]),
-            const Spacer(),
-            GestureDetector(
-              onTap: () => _downloadBill(context, order),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                        colors: [_hNavy, _hNMid],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                          color: _hNavy.withValues(alpha: 0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4))
-                    ]),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.picture_as_pdf_rounded,
-                      color: _hGold, size: 16),
-                  const SizedBox(width: 7),
-                  const Text("Download Bill",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12)),
-                ]),
+          child: Column(children: [
+            Row(children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("Total Paid",
+                    style: TextStyle(fontSize: 11, color: _hFade)),
+                const SizedBox(height: 2),
+                Text("₹${total.toStringAsFixed(2)}",
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: _hDark)),
+              ]),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _downloadBill(context, order),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                          colors: [_hNavy, _hNMid],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                            color: _hNavy.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3))
+                      ]),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.picture_as_pdf_rounded,
+                        color: _hGold, size: 15),
+                    const SizedBox(width: 6),
+                    const Text("Invoice",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12)),
+                  ]),
+                ),
               ),
-            ),
+            ]),
+            if (_isCancellable(status)) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _cancelOrder(context, order),
+                  icon: const Icon(Icons.cancel_outlined, size: 16),
+                  label: const Text("Cancel Order",
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
           ]),
         ),
       ]),
     );
+  }
+
+  // ── Cancel helpers ──────────────────────────────────────────
+  bool _isCancellable(String status) {
+    final s = status.toLowerCase();
+    return s == 'pending' || s == 'confirmed' || s == 'assigned';
+  }
+
+  Future<void> _cancelOrder(BuildContext context, Map<String, dynamic> order) async {
+    final status = ((order['status'] ?? '') as String).toLowerCase();
+    final orderId = order['id'] as String? ?? order['orderId'] as String? ?? '';
+
+    if (orderId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to find order ID'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    // Show cancellation reason dialog
+    final reasons = [
+      'Changed my mind',
+      'Found better price elsewhere',
+      'Ordered by mistake',
+      'Delivery taking too long',
+      'Need to modify order',
+      'Other',
+    ];
+    String? selectedReason;
+    final customCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.cancel_outlined, color: Colors.red.shade700, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Cancel Order', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Color(0xFF0A1628))),
+                      Text('This action cannot be undone', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                    ],
+                  ),
+                ]),
+                const SizedBox(height: 20),
+                const Text('Reason for cancellation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF0A1628))),
+                const SizedBox(height: 10),
+                ...reasons.map((r) {
+                  final sel = selectedReason == r;
+                  return GestureDetector(
+                    onTap: () => setS(() => selectedReason = r),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                      decoration: BoxDecoration(
+                        color: sel ? const Color(0xFF0A1628).withValues(alpha: 0.05) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: sel ? const Color(0xFF0A1628) : const Color(0xFFE2E8F0),
+                          width: sel ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(children: [
+                        Icon(sel ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                          size: 18, color: sel ? const Color(0xFF0A1628) : const Color(0xFF94A3B8)),
+                        const SizedBox(width: 10),
+                        Text(r, style: TextStyle(fontSize: 13, fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                          color: sel ? const Color(0xFF0A1628) : const Color(0xFF475569))),
+                      ]),
+                    ),
+                  );
+                }),
+                if (selectedReason == 'Other') ...[
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: customCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Please specify...',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFF0A1628), width: 1.5),
+                      ),
+                    ),
+                    maxLines: 2,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                // Refund note
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.info_outline, color: Colors.orange.shade700, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(
+                      status == 'assigned'
+                        ? 'You will receive a 90% refund for this order.'
+                        : 'You will receive a 100% refund for this order.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange.shade900, fontWeight: FontWeight.w600),
+                    )),
+                  ]),
+                ),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Expanded(child: TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Keep Order', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                  )),
+                  const SizedBox(width: 10),
+                  Expanded(child: ElevatedButton(
+                    onPressed: selectedReason == null ? null : () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.red.shade100,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                    ),
+                    child: const Text('Cancel Order', style: TextStyle(fontWeight: FontWeight.w800)),
+                  )),
+                ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final reason = selectedReason == 'Other'
+        ? (customCtrl.text.trim().isEmpty ? 'Other' : customCtrl.text.trim())
+        : selectedReason!;
+
+    try {
+      // Show loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Cancelling order...'),
+          ]),
+          backgroundColor: Color(0xFF0A1628),
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      final db = FirebaseFirestore.instance;
+      final double refundPct = status == 'assigned' ? 0.9 : 1.0;
+      final double totalAmt = (order['totalAmount'] as num? ?? order['total'] as num? ?? 0).toDouble();
+
+      await db.collection('orders').doc(orderId).update({
+        'status': 'cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancellationReason': reason,
+        'cancelledBy': 'user',
+        'refundAmount': totalAmt * refundPct,
+        'refundPercentage': refundPct * 100,
+        'refundStatus': 'pending',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Text('Order cancelled. Refund: ₹${(totalAmt * refundPct).toStringAsFixed(2)}'),
+            ]),
+            backgroundColor: Colors.green.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to cancel: $e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
   }
 
   // ── Status badge ───────────────────────────────────────────
@@ -673,13 +907,30 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
       build: (ctx) => [
         // ── HEADER ─────────────────────────────────────────
         pw.Container(
-          padding: const pw.EdgeInsets.all(24),
+          padding: const pw.EdgeInsets.all(28),
           decoration: pw.BoxDecoration(
               color: PdfColor.fromHex('#080F1E'),
-              borderRadius: pw.BorderRadius.circular(12)),
+              borderRadius: pw.BorderRadius.circular(14)),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
+              // Invoice title prominently at top
+              pw.Center(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColor.fromHex('#F5C518'),
+                    borderRadius: pw.BorderRadius.circular(8),
+                  ),
+                  child: pw.Text("INVOICE",
+                    style: pw.TextStyle(
+                      font: xb, fontSize: 18,
+                      color: PdfColor.fromHex('#080F1E'),
+                      letterSpacing: 4,
+                    )),
+                ),
+              ),
+              pw.SizedBox(height: 18),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -689,7 +940,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                       pw.Text("LAUNDRIFY",
                           style: pw.TextStyle(
                               font: xb,
-                              fontSize: 26,
+                              fontSize: 22,
                               color: PdfColor.fromHex('#F5C518'),
                               letterSpacing: 3)),
                       pw.SizedBox(height: 3),
@@ -703,29 +954,23 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
-                      pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
-                          decoration: pw.BoxDecoration(
-                              color: PdfColor.fromHex('#F5C518').shade(0.25),
-                              borderRadius: pw.BorderRadius.circular(6)),
-                          child: pw.Text("TAX INVOICE",
-                              style: pw.TextStyle(
-                                  font: bold,
-                                  fontSize: 11,
-                                  color: PdfColor.fromHex('#F5C518')))),
-                      pw.SizedBox(height: 6),
-                      pw.Text("Order #${order['orderId'] ?? ''}",
+                      pw.Text("Order #${order['orderId'] ?? order['id'] ?? 'N/A'}",
+                          style: pw.TextStyle(
+                              font: bold,
+                              fontSize: 12,
+                              color: PdfColors.white)),
+                      pw.SizedBox(height: 4),
+                      pw.Text(order['orderDate'] ?? '',
                           style: pw.TextStyle(
                               font: font,
                               fontSize: 10,
-                              color: PdfColors.white)),
+                              color: PdfColors.grey300)),
                     ],
                   ),
                 ],
               ),
               pw.SizedBox(height: 16),
-              pw.Divider(color: PdfColors.white, thickness: 0.5),
+              pw.Divider(color: PdfColor.fromHex('#F5C518'), thickness: 0.8),
               pw.SizedBox(height: 14),
               pw.Row(children: [
                 pw.Expanded(
@@ -936,7 +1181,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
             _pdfBillRow(
                 "Delivery Fee", "₹${delivery.toStringAsFixed(2)}", font, bold),
             pw.SizedBox(height: 8),
-            _pdfBillRow("GST (18%)", "₹${gst.toStringAsFixed(2)}", font, bold),
+            _pdfBillRow("GST (5%)", "₹${gst.toStringAsFixed(2)}", font, bold),
             pw.SizedBox(height: 10),
             pw.Divider(color: PdfColors.grey300, thickness: 0.5),
             pw.SizedBox(height: 10),

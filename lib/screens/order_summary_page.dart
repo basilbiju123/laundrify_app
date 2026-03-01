@@ -106,8 +106,8 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   double get subtotal => _serviceMap.values
       .expand((i) => i)
       .fold(0.0, (s, i) => s + (i['qty'] as int) * (i['price'] as num));
-  double get deliveryFee => 40.0;
-  double get gst => subtotal * 0.18;
+  double get deliveryFee => 20.0;
+  double get gst => subtotal * 0.05;
   double get total => subtotal + deliveryFee + gst;
 
   // ── Navigate to service page, await Navigator.pop result ──
@@ -645,7 +645,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
           const SizedBox(height: 12),
           _bRow("Delivery Fee", "₹${deliveryFee.toStringAsFixed(0)}"),
           const SizedBox(height: 12),
-          _bRow("GST (18%)", "₹${gst.toStringAsFixed(0)}"),
+          _bRow("GST (5%)", "₹${gst.toStringAsFixed(0)}"),
           const SizedBox(height: 14),
           Container(height: 1, color: const Color(0xFFF1F5F9)),
           const SizedBox(height: 14),

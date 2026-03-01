@@ -48,9 +48,9 @@ class RoleBasedAuthService {
 
   Future<List<UserRole>> getUserAccessibleRoles() async {
     final role = await getUserRole();
-    // Admin can access all dashboards
+    // Admin can access all dashboards including user
     if (role == UserRole.admin) {
-      return [UserRole.admin, UserRole.manager, UserRole.delivery, UserRole.staff];
+      return [UserRole.user, UserRole.admin, UserRole.manager, UserRole.delivery, UserRole.staff];
     }
     return [role];
   }
@@ -86,24 +86,74 @@ class RoleBasedAuthService {
     return showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Select Dashboard',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: roles.map((role) {
-            final route = _routeForRole(role);
-            final label = _labelForRole(role);
-            final icon = _iconForRole(role);
-            return ListTile(
-              leading: Icon(icon),
-              title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-              onTap: () => Navigator.pop(ctx, route),
-            );
-          }).toList(),
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: Colors.white,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF080F1E),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.dashboard_rounded, color: Color(0xFFF5C518), size: 28),
+              ),
+              const SizedBox(height: 16),
+              const Text('Choose Dashboard',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0A1628))),
+              const SizedBox(height: 6),
+              const Text('Select how you want to continue',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+              const SizedBox(height: 20),
+              ...roles.map((role) {
+                final route = _routeForRole(role);
+                final label = _labelForRole(role);
+                final icon = _iconForRole(role);
+                final color = _colorForRole(role);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.pop(ctx, route),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: color.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40, height: 40,
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(icon, color: color, size: 20),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(child: Text(label,
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: color))),
+                            Icon(Icons.arrow_forward_ios_rounded, color: color.withValues(alpha: 0.5), size: 14),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -199,6 +249,16 @@ class RoleBasedAuthService {
       case UserRole.delivery: return Icons.delivery_dining_rounded;
       case UserRole.staff:    return Icons.badge_rounded;
       default:                return Icons.person_rounded;
+    }
+  }
+
+  Color _colorForRole(UserRole role) {
+    switch (role) {
+      case UserRole.admin:    return const Color(0xFF080F1E);
+      case UserRole.manager:  return const Color(0xFF7C3AED);
+      case UserRole.delivery: return const Color(0xFF0EA5E9);
+      case UserRole.staff:    return const Color(0xFF059669);
+      default:                return const Color(0xFF1B4FD8);
     }
   }
 

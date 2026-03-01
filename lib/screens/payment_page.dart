@@ -22,6 +22,8 @@ class PaymentPage extends StatefulWidget {
   final List<Map<String, dynamic>> services;
   final String pickupDate;
   final String pickupTime;
+  final String deliveryDate;
+  final String deliveryTime;
   final String paymentMethod;
 
   const PaymentPage({
@@ -31,6 +33,8 @@ class PaymentPage extends StatefulWidget {
     required this.services,
     required this.pickupDate,
     required this.pickupTime,
+    this.deliveryDate = '',
+    this.deliveryTime = '',
     required this.paymentMethod,
   });
 
@@ -529,6 +533,8 @@ class _PaymentPageState extends State<PaymentPage> {
         'status': 'pending', 'paymentMethod': widget.paymentMethod,
         'paymentStatus': widget.paymentMethod == 'cod' ? 'pending' : 'paid',
         'pickupDate': widget.pickupDate, 'pickupTime': widget.pickupTime,
+        if (widget.deliveryDate.isNotEmpty) 'deliveryDate': widget.deliveryDate,
+        if (widget.deliveryTime.isNotEmpty) 'deliveryTime': widget.deliveryTime,
         if (razorpayPaymentId != null) 'razorpayPaymentId': razorpayPaymentId,
         if (razorpayOrderId   != null) 'razorpayOrderId':   razorpayOrderId,
         if (razorpaySignature != null) 'razorpaySignature': razorpaySignature,
