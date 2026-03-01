@@ -124,7 +124,7 @@ class OrderHistoryPage extends StatefulWidget {
 
 class _OrderHistoryPageState extends State<OrderHistoryPage> {
   String _filter = "All";
-  final _filters = ["All", "Confirmed", "Processing", "Completed", "Cancelled"];
+  final _filters = ["All", "Confirmed", "Processing", "Completed", "Cancelled", "Failed"];
 
   List<Map<String, dynamic>> _filterOrders(List<Map<String, dynamic>> all) {
     if (_filter == "All") return all;
@@ -531,6 +531,11 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
         fg = _hRed;
         icon = Icons.cancel_rounded;
         break;
+      case 'failed':
+        bg = const Color(0xFF7C3AED).withValues(alpha: 0.1);
+        fg = const Color(0xFF7C3AED);
+        icon = Icons.error_rounded;
+        break;
       default:
         bg = _hFade.withValues(alpha: 0.1);
         fg = _hFade;
@@ -578,10 +583,8 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
 
   // ── Loading ────────────────────────────────────────────────
   Widget _loadingState() {
-    return Scaffold(
-      backgroundColor: _hSurf,
-      body: Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    return Center(
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         SizedBox(
             width: 48,
             height: 48,
@@ -590,16 +593,14 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
         const Text("Loading your orders...",
             style: TextStyle(
                 fontSize: 14, color: _hFade, fontWeight: FontWeight.w600)),
-      ])),
+      ]),
     );
   }
 
   // ── Error ──────────────────────────────────────────────────
   Widget _errorState(String msg) {
-    return Scaffold(
-      backgroundColor: _hSurf,
-      body: Center(
-          child: Padding(
+    return Center(
+      child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
@@ -627,7 +628,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               child: const Text("Retry",
                   style: TextStyle(fontWeight: FontWeight.w800))),
         ]),
-      )),
+      ),
     );
   }
 

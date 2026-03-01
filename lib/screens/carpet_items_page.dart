@@ -1,3 +1,4 @@
+import '../widgets/item_image.dart';
 import 'package:flutter/material.dart';
 import 'constants.dart';
 import 'order_summary_page.dart';
@@ -251,12 +252,10 @@ class _CarpetCleaningPageState extends State<CarpetCleaningPage>
                             ),
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          child: ClipRRect(
+                          child: ItemImage(
+                            assetPath: item["image"],
+                            fit: BoxFit.cover,
                             borderRadius: BorderRadius.circular(14),
-                            child: Image.asset(
-                              item["image"],
-                              fit: BoxFit.cover,
-                            ),
                           ),
                         ),
                       ),

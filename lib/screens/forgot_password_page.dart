@@ -74,9 +74,6 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage>
       _showSnack("Password reset email sent. Check your inbox.",
           isError: false);
 
-      // Wait a moment before going back
-      await Future.delayed(const Duration(seconds: 2));
-
       if (!mounted) return;
       Navigator.pop(context); // back to login
     } on FirebaseAuthException catch (e) {

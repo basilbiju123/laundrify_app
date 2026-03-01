@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:lottie/lottie.dart';
+// lottie import removed - replaced with icon fallback (no asset file)
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../widgets/windows_layout.dart';
 
 import 'laundry_items_page.dart';
 import 'dryclean_items_page.dart';
@@ -15,9 +17,13 @@ import 'order_history_page.dart';
 import 'location_page.dart';
 import 'notifications_page.dart';
 import 'profile_page.dart';
+import 'orders_page.dart';
+import 'loyalty_page.dart';
 import 'help_page.dart';
 import 'settings_page.dart';
 import 'coupons_page.dart';
+import 'auth_options_page.dart';
+import 'abandoned_cart_page.dart';
 import '../services/firestore_service.dart';
 
 enum OrderStatus { pickup, processing, delivery }
@@ -53,15 +59,18 @@ class _DashboardPageState extends State<DashboardPage>
   final ScrollController _scrollController = ScrollController();
   Timer? _bannerTimer;
 
-  // 🔥 DEMO ORDER STATE (logic unchanged)
+  // Real Firebase order tracking
   bool hasActiveOrder = false;
   OrderStatus currentStatus = OrderStatus.pickup;
-  Timer? _demoOrderTimer;
+  String? activeOrderId;
+  Map<String, dynamic>? activeOrderData;
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Location state
   String? savedLocation;
 
   bool showRobotHelper = false;
+  int _currentTab = 0; // 0=Home 1=Orders 2=Track 3=Loyalty 4=Profile
 
   late AnimationController _entryController;
   late AnimationController _pulseController;
@@ -69,11 +78,44 @@ class _DashboardPageState extends State<DashboardPage>
   late Animation<Offset> _entrySlide;
   late Animation<double> _pulse;
 
-  final List<String> banners = [
-    "assets/images/banner1.png",
-    "assets/images/banner2.png",
-    "assets/images/banner3.png",
-    "assets/images/banner4.png",
+  // Banner data — no image assets needed, drawn in Flutter
+  final List<Map<String, dynamic>> _bannerData = [
+    {
+      'title': 'Fresh Laundry\nAt Your Door',
+      'subtitle': 'Save 20% on first order',
+      'icon': Icons.local_laundry_service_rounded,
+      'grad1': Color(0xFF1B4FD8),
+      'grad2': Color(0xFF0A3BAD),
+      'accent': Color(0xFFF5C518),
+      'badge': '20% OFF',
+    },
+    {
+      'title': 'Dry Clean\nExpress',
+      'subtitle': '24-hour turnaround guaranteed',
+      'icon': Icons.dry_cleaning_rounded,
+      'grad1': Color(0xFF0E7490),
+      'grad2': Color(0xFF0C4A6E),
+      'accent': Color(0xFF34D399),
+      'badge': 'EXPRESS',
+    },
+    {
+      'title': 'Shoe & Bag\nCleaning',
+      'subtitle': 'Premium care for your accessories',
+      'icon': Icons.checkroom_rounded,
+      'grad1': Color(0xFF7C3AED),
+      'grad2': Color(0xFF4C1D95),
+      'accent': Color(0xFFF59E0B),
+      'badge': 'PREMIUM',
+    },
+    {
+      'title': 'Free Pickup\n& Delivery',
+      'subtitle': 'On orders above ₹299',
+      'icon': Icons.delivery_dining_rounded,
+      'grad1': Color(0xFF059669),
+      'grad2': Color(0xFF065F46),
+      'accent': Color(0xFFFDE68A),
+      'badge': 'FREE',
+    },
   ];
 
   final GlobalKey _servicesKey = GlobalKey();
@@ -189,7 +231,7 @@ class _DashboardPageState extends State<DashboardPage>
     _bannerController = PageController();
     _bannerTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (_bannerController.hasClients) {
-        bannerIndex = (bannerIndex + 1) % banners.length;
+        bannerIndex = (bannerIndex + 1) % _bannerData.length;
         _bannerController.animateToPage(
           bannerIndex,
           duration: const Duration(milliseconds: 600),
@@ -243,6 +285,37 @@ class _DashboardPageState extends State<DashboardPage>
         if (mounted && orders.isNotEmpty) {
           setState(() => completedOrders = orders);
         }
+
+        // Check for real active order from Firestore
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          try {
+            final activeSnap = await FirebaseFirestore.instance
+                .collection('orders')
+                .where('userId', isEqualTo: uid)
+                .where('status', whereNotIn: ['delivered', 'completed', 'cancelled'])
+                .orderBy('createdAt', descending: true)
+                .limit(1)
+                .get();
+            if (activeSnap.docs.isNotEmpty && mounted) {
+              final doc = activeSnap.docs.first;
+              final d = doc.data();
+              final firestoreStatus = d['status'] ?? 'pending';
+              OrderStatus mappedStatus = OrderStatus.pickup;
+              if (['processing', 'picked', 'reached'].contains(firestoreStatus)) {
+                mappedStatus = OrderStatus.processing;
+              } else if (['out_for_delivery', 'ready', 'delivered'].contains(firestoreStatus)) {
+                mappedStatus = OrderStatus.delivery;
+              }
+              setState(() {
+                hasActiveOrder = true;
+                activeOrderId = doc.id;
+                activeOrderData = d;
+                currentStatus = mappedStatus;
+              });
+            }
+          } catch (_) {}
+        }
       }
     } catch (_) {}
   }
@@ -250,7 +323,6 @@ class _DashboardPageState extends State<DashboardPage>
   @override
   void dispose() {
     _bannerTimer?.cancel();
-    _demoOrderTimer?.cancel();
     _bannerController.dispose();
     _scrollController.dispose();
     _entryController.dispose();
@@ -258,35 +330,25 @@ class _DashboardPageState extends State<DashboardPage>
     super.dispose();
   }
 
-  // 🔥 DEMO ORDER LOGIC (unchanged)
+  // Navigate to laundry services to book a real order
   void _startDemoOrder() {
-    setState(() {
-      hasActiveOrder = true;
-      currentStatus = OrderStatus.pickup;
-    });
-    _demoOrderTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
-      setState(() {
-        if (currentStatus == OrderStatus.pickup) {
-          currentStatus = OrderStatus.processing;
-        } else if (currentStatus == OrderStatus.processing) {
-          currentStatus = OrderStatus.delivery;
-        } else {
-          timer.cancel();
-        }
-      });
-    });
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LaundryPage()),
+    );
   }
 
   // ═════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    final mobileScaffold = Stack(
       children: [
         Scaffold(
           key: _scaffoldKey,
           backgroundColor: _surface,
           extendBodyBehindAppBar: true,
           endDrawer: _drawer(),
+          bottomNavigationBar: _bottomNav(),
 
           // ── AppBar ─────────────────────────────────────────────────────
           appBar: AppBar(
@@ -331,6 +393,48 @@ class _DashboardPageState extends State<DashboardPage>
               ],
             ),
             actions: [
+              // Abandoned cart icon
+              StreamBuilder<QuerySnapshot>(
+                stream: user != null
+                    ? FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user!.uid)
+                        .collection('abandoned_carts')
+                        .where('status', isEqualTo: 'abandoned')
+                        .snapshots()
+                    : null,
+                builder: (ctx, snap) {
+                  final count = snap.data?.docs.length ?? 0;
+                  if (count == 0) return const SizedBox.shrink();
+                  return IconButton(
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(Icons.shopping_cart_outlined,
+                            color: Colors.white, size: 24),
+                        Positioned(
+                          right: -3,
+                          top: -3,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(
+                                color: Color(0xFFEF4444),
+                                shape: BoxShape.circle),
+                            child: Text('$count',
+                                style: const TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    onPressed: () => Navigator.push(context,
+                        MaterialPageRoute(
+                            builder: (_) => const AbandonedCartPage())),
+                  );
+                },
+              ),
               // Bell with gold dot
               IconButton(
                 icon: Stack(
@@ -412,58 +516,55 @@ class _DashboardPageState extends State<DashboardPage>
             ],
           ),
 
-          body: FadeTransition(
-            opacity: _entryFade,
-            child: SlideTransition(
-              position: _entrySlide,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── HERO ───────────────────────────────────────────
-                    _hero(context),
-
-                    const SizedBox(height: 22),
-
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ── BANNER ────────────────────────────────
-                          _banner(),
-
-                          const SizedBox(height: 30),
-
-                          // ── SERVICES ──────────────────────────────
-                          _sectionTitle("Our Services"),
-                          const SizedBox(height: 14),
-                          _servicesGrid(),
-
-                          const SizedBox(height: 30),
-
-                          // ── ORDERS ────────────────────────────────
-                          _sectionTitle("Your Orders"),
-                          const SizedBox(height: 14),
-
-                          hasActiveOrder
-                              ? _activeOrderCard()
-                              : _emptyOrderCard(),
-
-                          const SizedBox(height: 14),
-
-                          // ── HISTORY ───────────────────────────────
-                          _historyCard(),
-
-                          const SizedBox(height: 36),
-                        ],
-                      ),
+          body: IndexedStack(
+            index: _currentTab,
+            children: [
+              // ── TAB 0: HOME ───────────────────────────────────────
+              FadeTransition(
+                opacity: _entryFade,
+                child: SlideTransition(
+                  position: _entrySlide,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _hero(context),
+                        const SizedBox(height: 22),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _banner(),
+                              const SizedBox(height: 30),
+                              _sectionTitle("Our Services"),
+                              const SizedBox(height: 14),
+                              _servicesGrid(),
+                              const SizedBox(height: 30),
+                              _sectionTitle("Your Orders"),
+                              const SizedBox(height: 14),
+                              hasActiveOrder ? _activeOrderCard() : _emptyOrderCard(),
+                              const SizedBox(height: 14),
+                              _historyCard(),
+                              const SizedBox(height: 36),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+              // ── TAB 1: ORDERS ─────────────────────────────────────
+              const OrdersPage(),
+              // ── TAB 2: TRACK ──────────────────────────────────────
+              TrackOrderPage(orderId: activeOrderId ?? ''),
+              // ── TAB 3: LOYALTY ────────────────────────────────────
+              const LoyaltyPage(),
+              // ── TAB 4: PROFILE ────────────────────────────────────
+              const ProfilePage(),
+            ],
           ),
         ),
 
@@ -489,8 +590,16 @@ class _DashboardPageState extends State<DashboardPage>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Lottie.asset("assets/lottie/robot_helper.json",
-                        height: 130),
+                    Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        shape: BoxShape.circle,
+                        boxShadow: [BoxShadow(color: const Color(0xFF1B4FD8).withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 8))],
+                      ),
+                      child: const Icon(Icons.local_laundry_service_rounded, size: 52, color: Color(0xFF1B4FD8)),
+                    ),
                     const SizedBox(height: 16),
                     const Text(
                       "Choose a service to\nbook your first order.",
@@ -530,6 +639,11 @@ class _DashboardPageState extends State<DashboardPage>
             ),
           ),
       ],
+    );
+    return WindowsLayout(
+      title: 'Dashboard',
+      currentRoute: '/dashboard',
+      child: mobileScaffold,
     );
   }
 
@@ -601,20 +715,26 @@ class _DashboardPageState extends State<DashboardPage>
                 // Greeting row
                 Row(
                   children: [
-                    Text(
-                      "${_greeting()}, ",
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.55),
-                        fontSize: 15,
-                        fontWeight: FontWeight.w400,
+                    Flexible(
+                      child: Text(
+                        "${_greeting()}, ",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.55),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w400,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Text(
-                      firstName,
-                      style: const TextStyle(
-                        color: _goldSoft,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                    Flexible(
+                      child: Text(
+                        firstName,
+                        style: const TextStyle(
+                          color: _goldSoft,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const Text(" ✨", style: TextStyle(fontSize: 15)),
@@ -751,6 +871,126 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   // ── BANNER ────────────────────────────────────────────────────────────────
+
+  // ── CUSTOM BANNER SLIDE — no image assets needed ──────────────────────────
+  Widget _buildBannerSlide(Map<String, dynamic> b) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [b['grad1'] as Color, b['grad2'] as Color],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // Background pattern circles
+          Positioned(
+            right: -20,
+            top: -20,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 30,
+            bottom: -30,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.04),
+              ),
+            ),
+          ),
+          Positioned(
+            left: -10,
+            bottom: -25,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          // Content
+          Padding(
+            padding: const EdgeInsets.all(22),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (b['accent'] as Color).withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: (b['accent'] as Color).withValues(alpha: 0.5)),
+                        ),
+                        child: Text(
+                          b['badge'] as String,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: b['accent'] as Color,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        b['title'] as String,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        b['subtitle'] as String,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Icon(
+                    b['icon'] as IconData,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    size: 38,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _banner() {
     return Container(
       height: 175,
@@ -770,9 +1010,12 @@ class _DashboardPageState extends State<DashboardPage>
           children: [
             PageView.builder(
               controller: _bannerController,
-              itemCount: banners.length,
+              itemCount: _bannerData.length,
               onPageChanged: (i) => setState(() => bannerIndex = i),
-              itemBuilder: (_, i) => Image.asset(banners[i], fit: BoxFit.cover),
+              itemBuilder: (_, i) {
+                final b = _bannerData[i];
+                return _buildBannerSlide(b);
+              },
             ),
             Positioned(
               bottom: 16,
@@ -780,7 +1023,7 @@ class _DashboardPageState extends State<DashboardPage>
               right: 0,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(banners.length, (i) {
+                children: List.generate(_bannerData.length, (i) {
                   final active = bannerIndex == i;
                   return AnimatedContainer(
                     duration: const Duration(milliseconds: 350),
@@ -906,7 +1149,7 @@ class _DashboardPageState extends State<DashboardPage>
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) => TrackOrderPage(status: currentStatus)),
+            builder: (_) => TrackOrderPage(orderId: activeOrderId ?? '')),
       ),
       child: Container(
         decoration: BoxDecoration(
@@ -1542,8 +1785,10 @@ class _DashboardPageState extends State<DashboardPage>
                   }),
                   _tile(Icons.settings_outlined, "Settings", _textMid, () {
                     Navigator.pop(context);
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const SettingsPage()));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsPage()));
                   }),
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -1560,7 +1805,8 @@ class _DashboardPageState extends State<DashboardPage>
                             borderRadius: BorderRadius.circular(20)),
                         title: const Text('Sign Out',
                             style: TextStyle(fontWeight: FontWeight.w900)),
-                        content: const Text('Are you sure you want to sign out?'),
+                        content:
+                            const Text('Are you sure you want to sign out?'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(context, false),
@@ -1580,10 +1826,13 @@ class _DashboardPageState extends State<DashboardPage>
                       ),
                     );
                     if (shouldSignOut == true && mounted) {
-                      Navigator.pop(context);
+                      Navigator.pop(context); // close drawer
                       await FirebaseAuth.instance.signOut();
                       if (mounted) {
-                        Navigator.of(context).pushReplacementNamed('/login');
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                          (route) => false,
+                        );
                       }
                     }
                   }),
@@ -1599,6 +1848,74 @@ class _DashboardPageState extends State<DashboardPage>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+
+  // ── BOTTOM NAV BAR ────────────────────────────────────────────────────────
+  Widget _bottomNav() {
+    const items = [
+      {'icon': Icons.home_rounded, 'label': 'Home'},
+      {'icon': Icons.receipt_long_rounded, 'label': 'Orders'},
+      {'icon': Icons.local_shipping_rounded, 'label': 'Track'},
+      {'icon': Icons.card_giftcard_rounded, 'label': 'Loyalty'},
+      {'icon': Icons.person_rounded, 'label': 'Profile'},
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _navy,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, -4)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: List.generate(items.length, (i) {
+              final active = _currentTab == i;
+              final icon = items[i]['icon'] as IconData;
+              final label = items[i]['label'] as String;
+              return Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _currentTab = i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(
+                        color: active ? _gold : Colors.transparent,
+                        width: 2.5,
+                      )),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedScale(
+                          scale: active ? 1.15 : 1.0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Icon(icon,
+                            color: active ? _gold : Colors.white.withValues(alpha: 0.45),
+                            size: 24),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(label,
+                          style: TextStyle(
+                            color: active ? _gold : Colors.white.withValues(alpha: 0.45),
+                            fontSize: 10,
+                            fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+                          )),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
         ),
       ),
     );

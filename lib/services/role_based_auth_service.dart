@@ -1,257 +1,66 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-
-// User role types
-enum UserRole {
-  user, // Regular customer
-  delivery, // Delivery person
-  manager, // Manager
-  admin, // Admin
-}
+import '../models/firestore_models.dart';
 
 class RoleBasedAuthService {
-  static final RoleBasedAuthService _instance =
-      RoleBasedAuthService._internal();
+  static final RoleBasedAuthService _instance = RoleBasedAuthService._internal();
   factory RoleBasedAuthService() => _instance;
   RoleBasedAuthService._internal();
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ⚠️ CHANGE THESE TO YOUR EMAIL ADDRESSES
+  // ─────────────────────────────────────────────────────────────────────────
+  // SUPER ADMIN — this email always has full admin access regardless of DB role
+  // ─────────────────────────────────────────────────────────────────────────
+  static const String superAdminEmail = 'bsheena056@gmail.com';
 
-  // Admin emails - Full system access
-  static const List<String> adminEmails = [
-    'admin@gmail.com', // <<< CHANGE THIS!
-    'bsheena056@gmail.com', // Add more admin emails
-  ];
-
-  // Manager emails - Manage orders and operations
-  static const List<String> managerEmails = [
-    'manager@gmail.com', // <<< CHANGE THIS!
-    // Add more manager emails
-  ];
-
-  // Delivery emails - Handle deliveries
-  static const List<String> deliveryEmails = [
-    'delivery@gmail.com', // <<< CHANGE THIS!
-    // Add more delivery emails
-  ];
-
-  User? get currentUser => _auth.currentUser;
-  String? get userId => _auth.currentUser?.uid;
-
-  /// Check user's default role based on email
-  UserRole? _getDefaultRoleByEmail() {
-    final email = currentUser?.email?.toLowerCase();
-    if (email == null) return null;
-
-    // Check admin first (highest priority)
-    if (adminEmails.any((adminEmail) => adminEmail.toLowerCase() == email)) {
-      return UserRole.admin;
-    }
-
-    // Check manager
-    if (managerEmails
-        .any((managerEmail) => managerEmail.toLowerCase() == email)) {
-      return UserRole.manager;
-    }
-
-    // Check delivery
-    if (deliveryEmails
-        .any((deliveryEmail) => deliveryEmail.toLowerCase() == email)) {
-      return UserRole.delivery;
-    }
-
-    return null; // No default role, will be regular user
+  bool get isSuperAdmin {
+    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
+    return email == superAdminEmail.toLowerCase();
   }
 
-  /// Check if current user has a default role assigned
-  bool _hasDefaultRole() {
-    return _getDefaultRoleByEmail() != null;
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET USER ROLE FROM FIRESTORE
+  // ─────────────────────────────────────────────────────────────────────────
 
-  /// Get user's role from Firestore
   Future<UserRole> getUserRole() async {
-    if (userId == null) return UserRole.user;
+    final user = _auth.currentUser;
+    if (user == null) return UserRole.user;
 
-    // Check if user has a default role by email
-    final defaultRole = _getDefaultRoleByEmail();
-    if (defaultRole != null) {
-      // Auto-create role in Firestore if it doesn't exist
-      await _ensureDefaultRole(defaultRole);
-      return defaultRole;
-    }
+    // Super admin email always gets admin role
+    if (isSuperAdmin) return UserRole.admin;
 
     try {
-      final doc = await _db.collection('users').doc(userId).get();
-      if (doc.exists) {
-        final roleString = doc.data()?['role'] as String?;
-        return _parseRole(roleString);
-      }
-      return UserRole.user;
-    } catch (e) {
-      debugPrint('Error getting user role: $e');
+      final doc = await _db.collection('users').doc(user.uid).get();
+      if (!doc.exists) return UserRole.user;
+      final roleStr = (doc.data()?['role'] as String?) ?? 'user';
+      return _parseRole(roleStr);
+    } catch (_) {
       return UserRole.user;
     }
   }
 
-  /// Ensure default role is set in Firestore
-  Future<void> _ensureDefaultRole(UserRole role) async {
-    if (userId == null) return;
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET ACCESSIBLE ROLES (some users have multiple roles)
+  // ─────────────────────────────────────────────────────────────────────────
 
-    try {
-      final doc = await _db.collection('users').doc(userId).get();
-
-      // Only update if role doesn't match
-      final currentRole = doc.data()?['role'] as String?;
-      if (!doc.exists || currentRole != role.name) {
-        // Determine accessible roles based on the role
-        List<String> accessibleRoles;
-        switch (role) {
-          case UserRole.admin:
-            accessibleRoles = ['admin', 'manager', 'delivery', 'user'];
-            break;
-          case UserRole.manager:
-            accessibleRoles = ['manager', 'user'];
-            break;
-          case UserRole.delivery:
-            accessibleRoles = ['delivery', 'user'];
-            break;
-          case UserRole.user:
-            accessibleRoles = ['user'];
-            break;
-        }
-
-        await _db.collection('users').doc(userId).set({
-          'role': role.name,
-          'accessibleRoles': accessibleRoles,
-          'email': currentUser?.email,
-          'name': currentUser?.displayName ?? _getRoleDisplayName(role),
-          'photoUrl': currentUser?.photoURL,
-          'uid': userId,
-          'isDefaultRole': true,
-          'updatedAt': FieldValue.serverTimestamp(),
-          'createdAt': (doc.exists && doc.data() != null)
-              ? doc.data()!['createdAt']
-              : FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        debugPrint(
-            '✅ ${role.name} role automatically set for ${currentUser?.email}');
-      }
-    } catch (e) {
-      debugPrint('Error ensuring default role: $e');
-    }
-  }
-
-  /// Set user's role in Firestore
-  Future<void> setUserRole(UserRole role) async {
-    if (userId == null) return;
-
-    // Prevent changing role of users with default roles (admin, manager, delivery)
-    if (_hasDefaultRole()) {
-      debugPrint(
-          '⚠️ Cannot change role of default role users (admin/manager/delivery)');
-      return;
-    }
-
-    try {
-      await _db.collection('users').doc(userId).update({
-        'role': role.name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('Error setting user role: $e');
-    }
-  }
-
-  /// Check if user has specific role
-  Future<bool> hasRole(UserRole role) async {
-    final userRole = await getUserRole();
-    return userRole == role;
-  }
-
-  /// Check if user is admin
-  Future<bool> isAdmin() async {
-    return await hasRole(UserRole.admin);
-  }
-
-  /// Check if user is manager
-  Future<bool> isManager() async {
-    return await hasRole(UserRole.manager);
-  }
-
-  /// Check if user is delivery person
-  Future<bool> isDelivery() async {
-    return await hasRole(UserRole.delivery);
-  }
-
-  /// Get all roles user has access to (for multi-dashboard access)
   Future<List<UserRole>> getUserAccessibleRoles() async {
-    if (userId == null) return [UserRole.user];
-
-    // Check default role and return accessible roles
-    final defaultRole = _getDefaultRoleByEmail();
-    if (defaultRole != null) {
-      switch (defaultRole) {
-        case UserRole.admin:
-          return [
-            UserRole.admin,
-            UserRole.manager,
-            UserRole.delivery,
-            UserRole.user
-          ];
-        case UserRole.manager:
-          return [UserRole.manager, UserRole.user];
-        case UserRole.delivery:
-          return [UserRole.delivery, UserRole.user];
-        case UserRole.user:
-          return [UserRole.user];
-      }
+    final role = await getUserRole();
+    // Admin can access all dashboards
+    if (role == UserRole.admin) {
+      return [UserRole.admin, UserRole.manager, UserRole.delivery, UserRole.staff];
     }
-
-    try {
-      final doc = await _db.collection('users').doc(userId).get();
-      if (doc.exists) {
-        final roles = doc.data()?['accessibleRoles'] as List?;
-        if (roles != null) {
-          return roles.map((r) => _parseRole(r as String)).toList();
-        }
-      }
-      // Default: user only has access to their primary role
-      final primaryRole = await getUserRole();
-      return [primaryRole];
-    } catch (e) {
-      debugPrint('Error getting accessible roles: $e');
-      return [UserRole.user];
-    }
+    return [role];
   }
 
-  /// Grant user access to additional roles (only for regular users)
-  Future<void> grantRoleAccess(List<UserRole> roles) async {
-    if (userId == null) return;
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET DASHBOARD ROUTE BASED ON ROLE
+  // ─────────────────────────────────────────────────────────────────────────
 
-    // Prevent changing accessible roles for default role users
-    if (_hasDefaultRole()) {
-      debugPrint('⚠️ Cannot modify accessible roles for default role users');
-      return;
-    }
-
-    try {
-      await _db.collection('users').doc(userId).update({
-        'accessibleRoles': roles.map((r) => r.name).toList(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('Error granting role access: $e');
-    }
-  }
-
-  /// Navigate to appropriate dashboard based on role
   Future<String> getDashboardRoute() async {
     final role = await getUserRole();
-
     switch (role) {
       case UserRole.admin:
         return '/admin-dashboard';
@@ -259,270 +68,164 @@ class RoleBasedAuthService {
         return '/manager-dashboard';
       case UserRole.delivery:
         return '/delivery-dashboard';
-      case UserRole.user:
+      case UserRole.staff:
+        return '/employee-dashboard';
+      default:
         return '/dashboard';
     }
   }
 
-  /// Show role selection dialog if user has multiple accessible roles
+  // ─────────────────────────────────────────────────────────────────────────
+  // SHOW ROLE SELECTION DIALOG (for multi-role users)
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<String?> showRoleSelectionDialog(BuildContext context) async {
     final roles = await getUserAccessibleRoles();
-
     if (!context.mounted) return null;
 
-    if (roles.length == 1) {
-      // User has only one role, go directly to that dashboard
-      return _getRoleRoute(roles.first);
-    }
-
-    // User has multiple roles, show selection dialog
     return showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: Colors.transparent,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF3F6FD8),
-                Color(0xFF2F4F9F),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color.fromRGBO(255, 255, 255, 0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.dashboard_customize_rounded,
-                        size: 48,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Select Dashboard',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Choose which dashboard to access',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: const Color.fromRGBO(255, 255, 255, 0.9),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Dashboard options
-              Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(
-                    bottom: Radius.circular(24),
-                  ),
-                ),
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: roles.map((role) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => Navigator.pop(dialogContext, _getRoleRoute(role)),
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: _getRoleColor(role).withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: _getRoleColor(role).withValues(alpha: 0.3),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: _getRoleColor(role),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    _getRoleIcon(role),
-                                    color: Colors.white,
-                                    size: 28,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _getRoleDisplayName(role),
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: _getRoleColor(role),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _getRoleDescription(role),
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_forward_ios,
-                                  size: 18,
-                                  color: _getRoleColor(role),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Select Dashboard',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: roles.map((role) {
+            final route = _routeForRole(role);
+            final label = _labelForRole(role);
+            final icon = _iconForRole(role);
+            return ListTile(
+              leading: Icon(icon),
+              title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+              onTap: () => Navigator.pop(ctx, route),
+            );
+          }).toList(),
         ),
       ),
     );
   }
 
-  /// Get current user info with role
-  Future<Map<String, dynamic>> getCurrentUserInfo() async {
-    if (userId == null) return {};
+  // ─────────────────────────────────────────────────────────────────────────
+  // ROLE MANAGEMENT — Add/Remove roles for users
+  // ─────────────────────────────────────────────────────────────────────────
 
-    final role = await getUserRole();
-    final accessibleRoles = await getUserAccessibleRoles();
-
-    return {
-      'uid': userId,
-      'email': currentUser?.email,
-      'name': currentUser?.displayName,
-      'photoUrl': currentUser?.photoURL,
-      'role': role.name,
-      'accessibleRoles': accessibleRoles.map((r) => r.name).toList(),
-      'isDefaultRole': _hasDefaultRole(),
-    };
+  /// Assign a role to a user by UID
+  Future<void> assignRole(String uid, String role) async {
+    await _db.collection('users').doc(uid).update({
+      'role': role,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
-  /// Helper: Parse role string to enum
-  UserRole _parseRole(String? roleString) {
-    switch (roleString?.toLowerCase()) {
-      case 'admin':
-        return UserRole.admin;
-      case 'manager':
-        return UserRole.manager;
-      case 'delivery':
-        return UserRole.delivery;
-      case 'user':
-      default:
-        return UserRole.user;
+  /// Remove a role from a user (set back to 'user')
+  Future<void> removeRole(String uid) async {
+    await _db.collection('users').doc(uid).update({
+      'role': 'user',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Add role by email — finds the user and sets their role
+  Future<Map<String, dynamic>> addRoleByEmail(String email, String role) async {
+    try {
+      final snap = await _db
+          .collection('users')
+          .where('email', isEqualTo: email.trim().toLowerCase())
+          .limit(1)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        return {'success': false, 'error': 'No user found with email: $email'};
+      }
+
+      final doc = snap.docs.first;
+      await _db.collection('users').doc(doc.id).update({
+        'role': role,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      return {
+        'success': true,
+        'uid': doc.id,
+        'name': doc.data()['name'] ?? '',
+        'email': email,
+        'role': role,
+      };
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
     }
   }
 
-  /// Helper: Get route for role
-  String _getRoleRoute(UserRole role) {
+  /// Get all users with a specific role
+  Stream<QuerySnapshot> getUsersByRole(String role) {
+    return _db
+        .collection('users')
+        .where('role', isEqualTo: role)
+        .snapshots();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  String _routeForRole(UserRole role) {
     switch (role) {
-      case UserRole.admin:
-        return '/admin-dashboard';
-      case UserRole.manager:
-        return '/manager-dashboard';
-      case UserRole.delivery:
-        return '/delivery-dashboard';
-      case UserRole.user:
-        return '/dashboard';
+      case UserRole.admin:    return '/admin-dashboard';
+      case UserRole.manager:  return '/manager-dashboard';
+      case UserRole.delivery: return '/delivery-dashboard';
+      case UserRole.staff:    return '/employee-dashboard';
+      default:                return '/dashboard';
     }
   }
 
-  /// Helper: Get icon for role
-  IconData _getRoleIcon(UserRole role) {
+  String _labelForRole(UserRole role) {
     switch (role) {
-      case UserRole.admin:
-        return Icons.admin_panel_settings;
-      case UserRole.manager:
-        return Icons.manage_accounts;
-      case UserRole.delivery:
-        return Icons.delivery_dining;
-      case UserRole.user:
-        return Icons.person;
+      case UserRole.admin:    return 'Admin Dashboard';
+      case UserRole.manager:  return 'Manager Dashboard';
+      case UserRole.delivery: return 'Delivery Dashboard';
+      case UserRole.staff:    return 'Employee Dashboard';
+      default:                return 'User Dashboard';
     }
   }
 
-  /// Helper: Get color for role
-  Color _getRoleColor(UserRole role) {
+  IconData _iconForRole(UserRole role) {
     switch (role) {
-      case UserRole.admin:
-        return Colors.red;
-      case UserRole.manager:
-        return Colors.blue;
-      case UserRole.delivery:
-        return Colors.green;
-      case UserRole.user:
-        return Colors.grey;
+      case UserRole.admin:    return Icons.admin_panel_settings_rounded;
+      case UserRole.manager:  return Icons.manage_accounts_rounded;
+      case UserRole.delivery: return Icons.delivery_dining_rounded;
+      case UserRole.staff:    return Icons.badge_rounded;
+      default:                return Icons.person_rounded;
     }
   }
 
-  /// Helper: Get display name for role
-  String _getRoleDisplayName(UserRole role) {
-    switch (role) {
-      case UserRole.admin:
-        return 'Admin Dashboard';
-      case UserRole.manager:
-        return 'Manager Dashboard';
-      case UserRole.delivery:
-        return 'Delivery Dashboard';
-      case UserRole.user:
-        return 'User Dashboard';
+  UserRole _parseRole(String roleStr) {
+    switch (roleStr.toLowerCase()) {
+      case 'admin':    return UserRole.admin;
+      case 'manager':  return UserRole.manager;
+      case 'delivery': return UserRole.delivery;
+      case 'staff':    return UserRole.staff;
+      default:         return UserRole.user;
     }
   }
 
-  /// Helper: Get description for role
-  String _getRoleDescription(UserRole role) {
-    switch (role) {
-      case UserRole.admin:
-        return 'Manage entire system';
-      case UserRole.manager:
-        return 'Manage orders and operations';
-      case UserRole.delivery:
-        return 'Handle deliveries';
-      case UserRole.user:
-        return 'Place and track orders';
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHECK IF USER IS BLOCKED
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<bool> isUserBlocked() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    // Super admin is never blocked
+    if (isSuperAdmin) return false;
+    try {
+      final doc = await _db.collection('users').doc(user.uid).get();
+      return doc.data()?['isBlocked'] ?? false;
+    } catch (_) {
+      return false;
     }
   }
 }

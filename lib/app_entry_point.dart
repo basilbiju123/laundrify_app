@@ -6,9 +6,10 @@ import 'screens/splash_page.dart';
 import 'screens/onboarding_page.dart';
 import 'screens/auth_options_page.dart';
 import 'screens/dashboard.dart';
-import 'screens/admin_dashboard.dart';
+import 'screens/admin/admin_dashboard.dart';
 import 'screens/manager_dashboard.dart';
 import 'screens/delivery_dashboard.dart';
+import 'models/firestore_models.dart';
 import 'services/role_based_auth_service.dart';
 
 class AppEntryPoint extends StatefulWidget {

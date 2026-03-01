@@ -45,7 +45,8 @@ class DefaultFirebaseOptions {
     appId: '1:875682938754:ios:974db758a98339a216d99b',
     messagingSenderId: '875682938754',
     projectId: 'laundrify-d34c0',
-    databaseURL: 'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
+    databaseURL:
+        'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'laundrify-d34c0.firebasestorage.app',
     iosBundleId: 'com.example.lundrify',
   );
@@ -55,31 +56,34 @@ class DefaultFirebaseOptions {
     appId: '1:875682938754:ios:974db758a98339a216d99b',
     messagingSenderId: '875682938754',
     projectId: 'laundrify-d34c0',
-    databaseURL: 'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
+    databaseURL:
+        'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'laundrify-d34c0.firebasestorage.app',
     iosBundleId: 'com.example.lundrify',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
     apiKey: 'AIzaSyCUDKRMGAKJ7vnpzky9Z8vfQQruDlhAB0k',
-    appId: '1:875682938754:web:ce083f3efd2df46616d99b',
+    appId: '1:875682938754:web:287231a25ae5bbfa16d99b',
     messagingSenderId: '875682938754',
     projectId: 'laundrify-d34c0',
     authDomain: 'laundrify-d34c0.firebaseapp.com',
-    databaseURL: 'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
+    databaseURL:
+        'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'laundrify-d34c0.firebasestorage.app',
-    measurementId: 'G-4DV8HK6GN1',
+    measurementId: 'G-RN0JDWW2HD',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
     apiKey: 'AIzaSyCUDKRMGAKJ7vnpzky9Z8vfQQruDlhAB0k',
-    appId: '1:875682938754:web:ce083f3efd2df46616d99b',
+    appId: '1:875682938754:web:287231a25ae5bbfa16d99b',
     messagingSenderId: '875682938754',
     projectId: 'laundrify-d34c0',
     authDomain: 'laundrify-d34c0.firebaseapp.com',
-    databaseURL: 'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
+    databaseURL:
+        'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'laundrify-d34c0.firebasestorage.app',
-    measurementId: 'G-4DV8HK6GN1',
+    measurementId: 'G-RN0JDWW2HD',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -87,8 +91,8 @@ class DefaultFirebaseOptions {
     appId: '1:875682938754:android:6d61374bac70832d16d99b',
     messagingSenderId: '875682938754',
     projectId: 'laundrify-d34c0',
-    databaseURL: 'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
+    databaseURL:
+        'https://laundrify-d34c0-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'laundrify-d34c0.firebasestorage.app',
   );
-
 }

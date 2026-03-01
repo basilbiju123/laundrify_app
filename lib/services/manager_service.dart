@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 class ManagerService {
   static final ManagerService _instance = ManagerService._internal();
@@ -7,431 +8,215 @@ class ManagerService {
   ManagerService._internal();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // ═══════════════════════════════════════════════════════════
-  // ORDER MANAGEMENT
-  // ═══════════════════════════════════════════════════════════
+  String? get _uid => _auth.currentUser?.uid;
 
-  /// Get all orders
-  Stream<List<Map<String, dynamic>>> getAllOrders() {
-    return _db
-        .collection('orders')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
+  // ─────────────────────────────────────────────────────────────────────────
+  // DASHBOARD STATS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getDashboardStats() async {
+    try {
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final startOfMonth = DateTime(now.year, now.month, 1);
+
+      final todaySnap = await _db
+          .collection('orders')
+          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .get();
+
+      final monthSnap = await _db
+          .collection('orders')
+          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+          .where('status', isEqualTo: 'completed')
+          .get();
+
+      final pendingSnap = await _db
+          .collection('orders')
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      final deliverySnap = await _db
+          .collection('users')
+          .where('role', isEqualTo: 'delivery')
+          .get();
+
+      double monthRevenue = 0;
+      for (final doc in monthSnap.docs) {
+        monthRevenue += ((doc.data()['totalAmount'] ?? 0) as num).toDouble();
+      }
+
+      double todayRevenue = 0;
+      for (final doc in todaySnap.docs) {
+        if ((doc.data()['status'] ?? '') == 'completed') {
+          todayRevenue += ((doc.data()['totalAmount'] ?? 0) as num).toDouble();
+        }
+      }
+
+      return {
+        'todayOrders': todaySnap.docs.length,
+        'todayRevenue': todayRevenue,
+        'monthRevenue': monthRevenue,
+        'pendingOrders': pendingSnap.docs.length,
+        'totalDeliveryStaff': deliverySnap.docs.length,
+        'activeDeliveryStaff': deliverySnap.docs.where((d) => d.data()['isAvailable'] == true).length,
+      };
+    } catch (e) {
+      debugPrint('getDashboardStats error: $e');
+      return {
+        'todayOrders': 0,
+        'todayRevenue': 0.0,
+        'monthRevenue': 0.0,
+        'pendingOrders': 0,
+        'totalDeliveryStaff': 0,
+        'activeDeliveryStaff': 0,
+      };
+    }
   }
 
-  /// Get orders by status
+  // ─────────────────────────────────────────────────────────────────────────
+  // ORDER STREAMS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Stream<List<Map<String, dynamic>>> getPendingOrders() {
+    return _db
+        .collection('orders')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList());
+  }
+
   Stream<List<Map<String, dynamic>>> getOrdersByStatus(String status) {
     return _db
         .collection('orders')
         .where('status', isEqualTo: status)
         .orderBy('createdAt', descending: true)
+        .limit(30)
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
+        .map((snapshot) => snapshot.docs
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList());
   }
 
-  /// Get pending orders (need assignment)
-  Stream<List<Map<String, dynamic>>> getPendingOrders() {
+  Stream<QuerySnapshot> getAllOrders() {
     return _db
         .collection('orders')
-        .where('status', isEqualTo: 'pending')
-        .orderBy('createdAt', descending: false) // Oldest first
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
-  }
-
-  /// Get today's orders
-  Stream<List<Map<String, dynamic>>> getTodayOrders() {
-    final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
-    
-    return _db
-        .collection('orders')
-        .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
         .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
+        .limit(50)
+        .snapshots();
   }
 
-  /// Update order status
-  Future<bool> updateOrderStatus(String orderId, String newStatus, {String? note}) async {
-    try {
-      await _db.collection('orders').doc(orderId).update({
-        'status': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': newStatus,
-            'timestamp': FieldValue.serverTimestamp(),
-            'updatedBy': 'manager',
-            'note': note,
-          }
-        ]),
-      });
-      return true;
-    } catch (e) {
-      debugPrint('Error updating order status: $e');
-      return false;
-    }
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // DELIVERY PERSONNEL
+  // ─────────────────────────────────────────────────────────────────────────
 
-  /// Assign order to delivery person
-  Future<bool> assignOrderToDelivery(String orderId, String deliveryPersonId, String deliveryPersonName) async {
-    try {
-      await _db.collection('orders').doc(orderId).update({
-        'assignedTo': deliveryPersonId,
-        'assignedToName': deliveryPersonName,
-        'status': 'assigned',
-        'assignedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'assigned',
-            'timestamp': FieldValue.serverTimestamp(),
-            'updatedBy': 'manager',
-            'note': 'Assigned to $deliveryPersonName',
-          }
-        ]),
-      });
-      return true;
-    } catch (e) {
-      debugPrint('Error assigning order: $e');
-      return false;
-    }
-  }
-
-  /// Cancel order (with conditions)
-  Future<Map<String, dynamic>> cancelOrder(String orderId, String reason) async {
-    try {
-      final orderDoc = await _db.collection('orders').doc(orderId).get();
-      
-      if (!orderDoc.exists) {
-        return {'success': false, 'error': 'Order not found'};
-      }
-
-      final orderData = orderDoc.data()!;
-      final status = orderData['status'];
-
-      // Check if order can be cancelled
-      if (status == 'delivered' || status == 'cancelled') {
-        return {
-          'success': false,
-          'error': 'Cannot cancel ${status == 'delivered' ? 'delivered' : 'already cancelled'} order'
-        };
-      }
-
-      if (status == 'in_transit' || status == 'picked_up') {
-        return {
-          'success': false,
-          'error': 'Cannot cancel order that is already picked up or in transit. Please contact delivery person.',
-        };
-      }
-
-      // Cancel the order
-      await _db.collection('orders').doc(orderId).update({
-        'status': 'cancelled',
-        'cancelledAt': FieldValue.serverTimestamp(),
-        'cancellationReason': reason,
-        'cancelledBy': 'manager',
-        'updatedAt': FieldValue.serverTimestamp(),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'cancelled',
-            'timestamp': FieldValue.serverTimestamp(),
-            'updatedBy': 'manager',
-            'note': 'Order cancelled: $reason',
-          }
-        ]),
-      });
-
-      return {'success': true, 'message': 'Order cancelled successfully'};
-    } catch (e) {
-      debugPrint('Error cancelling order: $e');
-      return {'success': false, 'error': 'Failed to cancel order'};
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // DELIVERY STAFF MANAGEMENT
-  // ═══════════════════════════════════════════════════════════
-
-  /// Get all delivery personnel
   Stream<List<Map<String, dynamic>>> getDeliveryPersonnel() {
     return _db
         .collection('users')
         .where('role', isEqualTo: 'delivery')
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
+        .map((snapshot) => snapshot.docs
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList());
   }
 
-  /// Get available delivery personnel (not currently assigned)
   Future<List<Map<String, dynamic>>> getAvailableDeliveryPersonnel() async {
     try {
-      final allDelivery = await _db
+      final snap = await _db
           .collection('users')
           .where('role', isEqualTo: 'delivery')
+          .where('isAvailable', isEqualTo: true)
           .get();
-
-      List<Map<String, dynamic>> available = [];
-
-      for (var doc in allDelivery.docs) {
-        final deliveryId = doc.id;
-        
-        // Check active assignments
-        final activeOrders = await _db
-            .collection('orders')
-            .where('assignedTo', isEqualTo: deliveryId)
-            .where('status', whereIn: ['assigned', 'picked_up', 'in_transit'])
-            .get();
-
-        if (activeOrders.docs.isEmpty) {
-          final data = doc.data();
-          data['id'] = doc.id;
-          available.add(data);
-        }
-      }
-
-      return available;
+      return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
     } catch (e) {
-      debugPrint('Error getting available delivery personnel: $e');
+      debugPrint('getAvailableDeliveryPersonnel error: $e');
       return [];
     }
   }
 
-  /// Get delivery person's active orders count
   Future<int> getDeliveryPersonActiveOrders(String deliveryPersonId) async {
     try {
-      final orders = await _db
+      final snap = await _db
           .collection('orders')
           .where('assignedTo', isEqualTo: deliveryPersonId)
-          .where('status', whereIn: ['assigned', 'picked_up', 'in_transit'])
+          .where('status', whereIn: ['assigned', 'accepted', 'pickup', 'delivery'])
           .get();
-      return orders.docs.length;
+      return snap.docs.length;
     } catch (e) {
-      debugPrint('Error getting active orders count: $e');
+      debugPrint('getDeliveryPersonActiveOrders error: $e');
       return 0;
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // STATISTICS & ANALYTICS
-  // ═══════════════════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────────────────────────
+  // ORDER ACTIONS
+  // ─────────────────────────────────────────────────────────────────────────
 
-  /// Get manager dashboard statistics
-  Future<Map<String, dynamic>> getDashboardStats() async {
+  Future<bool> assignOrderToDelivery(
+    String orderId,
+    String deliveryPersonId,
+    [String? deliveryPersonName]
+  ) async {
     try {
-      final ordersSnapshot = await _db.collection('orders').get();
-      final totalOrders = ordersSnapshot.docs.length;
-
-      final pendingOrders = ordersSnapshot.docs
-          .where((doc) => doc.data()['status'] == 'pending')
-          .length;
-
-      final assignedOrders = ordersSnapshot.docs
-          .where((doc) => doc.data()['status'] == 'assigned')
-          .length;
-
-      final inTransitOrders = ordersSnapshot.docs
-          .where((doc) => 
-              doc.data()['status'] == 'picked_up' ||
-              doc.data()['status'] == 'in_transit')
-          .length;
-
-      final completedOrders = ordersSnapshot.docs
-          .where((doc) => doc.data()['status'] == 'delivered')
-          .length;
-
-      final cancelledOrders = ordersSnapshot.docs
-          .where((doc) => doc.data()['status'] == 'cancelled')
-          .length;
-
-      // Get today's orders
-      final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final todayOrders = ordersSnapshot.docs
-          .where((doc) {
-            final createdAt = (doc.data()['createdAt'] as Timestamp?)?.toDate();
-            return createdAt != null && createdAt.isAfter(todayStart);
-          })
-          .length;
-
-      // Calculate revenue
-      double totalRevenue = 0;
-      double todayRevenue = 0;
-      for (var doc in ordersSnapshot.docs) {
-        if (doc.data()['status'] == 'delivered') {
-          final amount = (doc.data()['totalAmount'] as num?)?.toDouble() ?? 0;
-          totalRevenue += amount;
-          
-          final deliveredAt = (doc.data()['deliveredAt'] as Timestamp?)?.toDate();
-          if (deliveredAt != null && deliveredAt.isAfter(todayStart)) {
-            todayRevenue += amount;
-          }
-        }
-      }
-
-      // Get delivery personnel count
-      final deliverySnapshot = await _db
-          .collection('users')
-          .where('role', isEqualTo: 'delivery')
-          .get();
-      final totalDeliveryPersonnel = deliverySnapshot.docs.length;
-
-      return {
-        'totalOrders': totalOrders,
-        'pendingOrders': pendingOrders,
-        'assignedOrders': assignedOrders,
-        'inTransitOrders': inTransitOrders,
-        'completedOrders': completedOrders,
-        'cancelledOrders': cancelledOrders,
-        'todayOrders': todayOrders,
-        'totalRevenue': totalRevenue,
-        'todayRevenue': todayRevenue,
-        'totalDeliveryPersonnel': totalDeliveryPersonnel,
-      };
-    } catch (e) {
-      debugPrint('Error getting dashboard stats: $e');
-      return {};
-    }
-  }
-
-  /// Get daily order statistics
-  Future<List<Map<String, dynamic>>> getDailyStats(int days) async {
-    List<Map<String, dynamic>> dailyData = [];
-    final now = DateTime.now();
-
-    for (int i = days - 1; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      final dayStart = DateTime(date.year, date.month, date.day);
-      final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59);
-
-      final orders = await _db
-          .collection('orders')
-          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart))
-          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(dayEnd))
-          .get();
-
-      double revenue = 0;
-      for (var doc in orders.docs) {
-        if (doc.data()['status'] == 'delivered') {
-          revenue += (doc.data()['totalAmount'] as num?)?.toDouble() ?? 0;
-        }
-      }
-
-      dailyData.add({
-        'date': '${date.day}/${date.month}',
-        'orders': orders.docs.length,
-        'revenue': revenue,
+      await _db.collection('orders').doc(orderId).update({
+        'status': 'assigned',
+        'assignedTo': deliveryPersonId,
+        'assignedBy': _uid,
+        'assignedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
-    }
-
-    return dailyData;
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // ISSUES & SUPPORT
-  // ═══════════════════════════════════════════════════════════
-
-  /// Get all order issues
-  Stream<List<Map<String, dynamic>>> getOrderIssues() {
-    return _db
-        .collection('orderIssues')
-        .where('status', isEqualTo: 'open')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
-  }
-
-  /// Resolve an issue
-  Future<bool> resolveIssue(String issueId, String resolution) async {
-    try {
-      await _db.collection('orderIssues').doc(issueId).update({
-        'status': 'resolved',
-        'resolution': resolution,
-        'resolvedAt': FieldValue.serverTimestamp(),
-        'resolvedBy': 'manager',
+      // Update delivery person active orders count
+      await _db.collection('users').doc(deliveryPersonId).update({
+        'activeOrders': FieldValue.increment(1),
       });
       return true;
     } catch (e) {
-      debugPrint('Error resolving issue: $e');
+      debugPrint('assignOrderToDelivery error: $e');
       return false;
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // CUSTOMER MANAGEMENT
-  // ═══════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> cancelOrder(String orderId, String reason) async {
+    try {
+      final orderDoc = await _db.collection('orders').doc(orderId).get();
+      final assignedTo = orderDoc.data()?['assignedTo'] as String?;
 
-  /// Get all customers
-  Stream<List<Map<String, dynamic>>> getAllCustomers() {
-    return _db
-        .collection('users')
-        .where('role', isEqualTo: 'user')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-    });
+      await _db.collection('orders').doc(orderId).update({
+        'status': 'cancelled',
+        'cancelReason': reason,
+        'cancelledBy': _uid,
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Decrease delivery person's active orders
+      if (assignedTo != null) {
+        await _db.collection('users').doc(assignedTo).update({
+          'activeOrders': FieldValue.increment(-1),
+        });
+      }
+
+      return {'success': true};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
   }
 
-  /// Get customer order history
-  Future<List<Map<String, dynamic>>> getCustomerOrders(String customerId) async {
+  Future<Map<String, dynamic>> updateOrderStatus(String orderId, String newStatus) async {
     try {
-      final orders = await _db
-          .collection('orders')
-          .where('userId', isEqualTo: customerId)
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      return orders.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
+      await _db.collection('orders').doc(orderId).update({
+        'status': newStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (newStatus == 'completed') 'completedAt': FieldValue.serverTimestamp(),
+      });
+      return {'success': true};
     } catch (e) {
-      debugPrint('Error getting customer orders: $e');
-      return [];
+      return {'success': false, 'error': e.toString()};
     }
   }
 }

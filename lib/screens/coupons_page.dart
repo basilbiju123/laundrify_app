@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firestore_service.dart';
 
 const _navy = Color(0xFF080F1E);
@@ -46,9 +48,13 @@ class _CouponsPageState extends State<CouponsPage>
       // Load coupons from Firestore
       final coupons = await _firestore.getUserCoupons();
 
-      // For demo purposes, add some default coupons if none exist
+      // If user has no coupons yet, seed welcome coupons into Firestore
       if (coupons.isEmpty) {
-        availableCoupons = _getDefaultCoupons();
+        await _seedWelcomeCoupons();
+        final seeded = await _firestore.getUserCoupons();
+        availableCoupons = seeded
+            .where((c) => c['status'] == 'available' || c['status'] == null)
+            .toList();
         usedCoupons = [];
       } else {
         availableCoupons = coupons
@@ -59,12 +65,35 @@ class _CouponsPageState extends State<CouponsPage>
       }
     } catch (e) {
       debugPrint('Error loading coupons: $e');
-      // Load default coupons on error
       availableCoupons = _getDefaultCoupons();
       usedCoupons = [];
     }
 
     setState(() => isLoading = false);
+  }
+
+  Future<void> _seedWelcomeCoupons() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      final defaults = _getDefaultCoupons();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final coupon in defaults) {
+        final ref = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('coupons')
+            .doc();
+        batch.set(ref, {
+          ...coupon,
+          'status': 'available',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Seed coupons error: $e');
+    }
   }
 
   List<Map<String, dynamic>> _getDefaultCoupons() {

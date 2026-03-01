@@ -1,743 +1,555 @@
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
-import 'dart:math' as math;
-import 'dashboard.dart';
+import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-class TrackOrderPage extends StatelessWidget {
-  final OrderStatus status;
+class TrackOrderPage extends StatefulWidget {
+  final String orderId;
+  const TrackOrderPage({super.key, required this.orderId});
 
-  const TrackOrderPage({
-    super.key,
-    required this.status,
-  });
+  @override
+  State<TrackOrderPage> createState() => _TrackOrderPageState();
+}
+
+class _TrackOrderPageState extends State<TrackOrderPage> {
+  static const _navy = Color(0xFF080F1E);
+  static const _gold = Color(0xFFF5C518);
+  static const _bg = Color(0xFFF0F4FF);
+  static const _card = Colors.white;
+
+  final _db = FirebaseFirestore.instance;
+
+  final List<Map<String, dynamic>> _stages = [
+    {
+      'label': 'Order Placed',
+      'icon': Icons.receipt_long_rounded,
+      'status': 'pending'
+    },
+    {
+      'label': 'Pickup Scheduled',
+      'icon': Icons.calendar_today_rounded,
+      'status': 'assigned'
+    },
+    {
+      'label': 'Picked Up',
+      'icon': Icons.local_shipping_outlined,
+      'status': 'pickup'
+    },
+    {
+      'label': 'Processing',
+      'icon': Icons.local_laundry_service_outlined,
+      'status': 'processing'
+    },
+    {
+      'label': 'Out for Delivery',
+      'icon': Icons.delivery_dining_rounded,
+      'status': 'delivery'
+    },
+    {
+      'label': 'Delivered',
+      'icon': Icons.check_circle_outline_rounded,
+      'status': 'completed'
+    },
+  ];
+
+  int _getStageIndex(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return 0;
+      case 'assigned':
+      case 'accepted':
+        return 1;
+      case 'pickup':
+        return 2;
+      case 'processing':
+        return 3;
+      case 'delivery':
+      case 'out_for_delivery':
+        return 4;
+      case 'completed':
+      case 'delivered':
+        return 5;
+      default:
+        return 0;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FE),
-      body: CustomScrollView(
-        slivers: [
-          // AWESOME Gradient App Bar with Better Title
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: const Color(0xFF3F6FD8),
-            foregroundColor: Colors.white,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-            flexibleSpace: FlexibleSpaceBar(
-              centerTitle: false,
-              titlePadding: const EdgeInsets.only(left: 56, bottom: 20),
-              title: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "TRACK YOUR",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w300,
-                      fontSize: 14,
-                      color: Colors.white70,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  ShaderMask(
-                    shaderCallback: (bounds) => const LinearGradient(
-                      colors: [Colors.white, Color(0xFFFDE68A)],
-                    ).createShader(bounds),
-                    child: const Text(
-                      "ORDER",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 32,
-                        color: Colors.white,
-                        letterSpacing: 1,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black26,
-                            offset: Offset(0, 2),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+      backgroundColor: _bg,
+      appBar: AppBar(
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+        title: const Text(
+          'Track Order',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
+        elevation: 0,
+      ),
+      body: widget.orderId.isEmpty
+          ? const Center(
+              child: Text(
+                'No order to track',
+                style: TextStyle(color: Color(0xFF475569), fontSize: 15),
               ),
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      const Color(0xFF3F6FD8),
-                      const Color(0xFF2F4F9F),
-                      const Color(0xFF1E3A8A),
-                    ],
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    // Decorative circles
-                    Positioned(
-                      right: -50,
-                      top: 50,
-                      child: Container(
-                        width: 150,
-                        height: 150,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withValues(alpha: 0.05),
-                        ),
-                      ),
+            )
+          : StreamBuilder<DocumentSnapshot>(
+              stream: _db.collection('orders').doc(widget.orderId).snapshots(),
+              builder: (ctx, snap) {
+                if (!snap.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      color: _gold,
+                      strokeWidth: 2,
                     ),
-                    Positioned(
-                      left: -30,
-                      top: 100,
-                      child: Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFFFDE68A).withValues(alpha: 0.1),
-                        ),
-                      ),
-                    ),
-                    SafeArea(
-                      child: Padding(
+                  );
+                }
+                if (!snap.data!.exists) {
+                  return const Center(child: Text('Order not found'));
+                }
+
+                final order = snap.data!.data() as Map<String, dynamic>;
+                final status = order['status'] ?? 'pending';
+                final currentStage = _getStageIndex(status);
+                final isCancelled = status == 'cancelled';
+
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ORDER ID CARD
+                      Container(
                         padding: const EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        decoration: BoxDecoration(
+                          color: _card,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            )
+                          ],
+                        ),
+                        child: Row(
                           children: [
-                            const SizedBox(height: 80),
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
+                              padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.3),
-                                ),
+                                color: _gold.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                              child: const Icon(
+                                Icons.receipt_long_rounded,
+                                color: _gold,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: _getStatusColor(),
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: _getStatusColor(),
-                                          blurRadius: 8,
-                                          spreadRadius: 2,
-                                        ),
-                                      ],
+                                  const Text(
+                                    'Order ID',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF475569),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
                                   Text(
-                                    _getStatusText(),
+                                    '#${widget.orderId.substring(0, 8).toUpperCase()}',
                                     style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: _navy,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
+                            _StatusBadge(status: status),
                           ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
 
-          // Content
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  // Order Info Card
-                  _buildOrderInfoCard(),
+                      const SizedBox(height: 24),
 
-                  const SizedBox(height: 24),
-
-                  // Timeline Progress
-                  _buildTimelineProgress(),
-
-                  const SizedBox(height: 24),
-
-                  // Estimated Time Card
-                  _buildEstimatedTimeCard(),
-
-                  const SizedBox(height: 24),
-
-                  // Action Buttons
-                  _buildActionButtons(context),
-
-                  const SizedBox(height: 20),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOrderInfoCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white,
-            const Color(0xFFF4F7FE),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3F6FD8).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.receipt_long_rounded,
-                  color: Color(0xFF3F6FD8),
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 16),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Order #LAU12345",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0A1628),
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      "Placed Today at 10:30 AM",
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF64748B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          Container(
-            height: 1,
-            color: Colors.grey.shade200,
-          ),
-
-          const SizedBox(height: 16),
-
-          // Order Details
-          _infoRow(Icons.shopping_bag_outlined, "Items", "5 items"),
-          const SizedBox(height: 12),
-          _infoRow(Icons.location_on_outlined, "Delivery", "Home Address"),
-          const SizedBox(height: 12),
-          _infoRow(Icons.credit_card_rounded, "Payment", "Paid · ₹450"),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTimelineProgress() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Order Progress",
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0A1628),
-            ),
-          ),
-          const SizedBox(height: 28),
-
-          // Timeline Steps
-          _buildTimelineStep(
-            OrderStatus.pickup,
-            "Pickup Scheduled",
-            "Driver is collecting your items",
-            Icons.local_shipping_rounded,
-            "assets/lottie/pickup.json",
-            isFirst: true,
-          ),
-
-          _buildTimelineStep(
-            OrderStatus.processing,
-            "Processing",
-            "Items being professionally cleaned",
-            Icons.local_laundry_service_rounded,
-            "assets/lottie/processing.json",
-          ),
-
-          _buildTimelineStep(
-            OrderStatus.delivery,
-            "Out for Delivery",
-            "Fresh items arriving soon",
-            Icons.delivery_dining_rounded,
-            "assets/lottie/delivery.json",
-            isLast: true,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTimelineStep(
-    OrderStatus step,
-    String title,
-    String subtitle,
-    IconData icon,
-    String lottieFile, {
-    bool isFirst = false,
-    bool isLast = false,
-  }) {
-    final isActive = status == step;
-    final isCompleted = status.index > step.index;
-
-    final Color stepColor = isCompleted
-        ? const Color(0xFF10B981)
-        : isActive
-            ? const Color(0xFF3F6FD8)
-            : const Color(0xFFCBD5E1);
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Timeline Line
-          Column(
-            children: [
-              // Top line
-              if (!isFirst)
-                Container(
-                  width: 3,
-                  height: 20,
-                  color: status.index > step.index
-                      ? const Color(0xFF10B981)
-                      : const Color(0xFFE2E8F0),
-                ),
-
-              // Circle
-              TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 600),
-                tween: Tween(begin: 0.0, end: 1.0),
-                builder: (context, value, child) {
-                  return Transform.scale(
-                    scale: isActive
-                        ? 1.0 + (math.sin(value * math.pi * 2) * 0.1)
-                        : 1.0,
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isCompleted
-                            ? const Color(0xFF10B981)
-                            : isActive
-                                ? const Color(0xFF3F6FD8)
-                                : Colors.white,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: stepColor,
-                          width: isActive ? 3 : 2,
-                        ),
-                        boxShadow: isActive
-                            ? [
-                                BoxShadow(
-                                  color: const Color(0xFF3F6FD8)
-                                      .withValues(alpha: 0.3),
-                                  blurRadius: 12,
-                                  spreadRadius: 2,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: isCompleted
-                          ? const Icon(
-                              Icons.check_rounded,
-                              color: Colors.white,
-                              size: 26,
-                            )
-                          : Icon(
-                              icon,
-                              color: isActive ? Colors.white : stepColor,
-                              size: 24,
-                            ),
-                    ),
-                  );
-                },
-              ),
-
-              // Bottom line
-              if (!isLast)
-                Expanded(
-                  child: Container(
-                    width: 3,
-                    margin: const EdgeInsets.only(top: 8),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: isCompleted
-                            ? [
-                                const Color(0xFF10B981),
-                                status.index > step.index + 1
-                                    ? const Color(0xFF10B981)
-                                    : const Color(0xFFE2E8F0),
-                              ]
-                            : [
-                                const Color(0xFFE2E8F0),
-                                const Color(0xFFE2E8F0),
-                              ],
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-
-          const SizedBox(width: 20),
-
-          // Content
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                bottom: isLast ? 0 : 32,
-                top: 4,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
+                      // TRACKING TIMELINE
+                      if (!isCancelled) ...[
+                        const Text(
+                          'Order Timeline',
                           style: TextStyle(
                             fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: isActive || isCompleted
-                                ? const Color(0xFF0A1628)
-                                : const Color(0xFF94A3B8),
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
                           ),
                         ),
-                      ),
-                      if (isCompleted)
+                        const SizedBox(height: 16),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: _card,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              )
+                            ],
                           ),
+                          child: Column(
+                            children: _stages.asMap().entries.map((entry) {
+                              final i = entry.key;
+                              final stage = entry.value;
+                              final isDone = i <= currentStage;
+                              final isCurrent = i == currentStage;
+                              final isLast = i == _stages.length - 1;
+
+                              return Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      Column(
+                                        children: [
+                                          Container(
+                                            width: 40,
+                                            height: 40,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: isDone
+                                                  ? (isCurrent
+                                                      ? _gold
+                                                      : const Color(0xFF10B981))
+                                                  : const Color(0xFFE8EDF5),
+                                              boxShadow: isCurrent
+                                                  ? [
+                                                      BoxShadow(
+                                                        color: _gold.withValues(
+                                                            alpha: 0.4),
+                                                        blurRadius: 10,
+                                                        offset:
+                                                            const Offset(0, 2),
+                                                      )
+                                                    ]
+                                                  : null,
+                                            ),
+                                            child: Icon(
+                                              isDone && !isCurrent
+                                                  ? Icons.check_rounded
+                                                  : stage['icon'] as IconData,
+                                              color: isDone
+                                                  ? Colors.white
+                                                  : const Color(0xFF94A3B8),
+                                              size: 20,
+                                            ),
+                                          ),
+                                          if (!isLast)
+                                            Container(
+                                              width: 2,
+                                              height: 32,
+                                              color: i < currentStage
+                                                  ? const Color(0xFF10B981)
+                                                  : const Color(0xFFE8EDF5),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Padding(
+                                          padding: EdgeInsets.only(
+                                            bottom: isLast ? 0 : 16,
+                                          ),
+                                          child: Text(
+                                            stage['label'] as String,
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: isCurrent
+                                                  ? FontWeight.w800
+                                                  : FontWeight.w600,
+                                              color: isDone
+                                                  ? _navy
+                                                  : const Color(0xFF94A3B8),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ] else ...[
+                        Container(
+                          padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
                             color:
-                                const Color(0xFF10B981).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
+                                const Color(0xFFEF4444).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: const Color(0xFFEF4444)
+                                  .withValues(alpha: 0.3),
+                            ),
                           ),
-                          child: const Text(
-                            "Completed",
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF10B981),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.cancel_outlined,
+                                  color: Color(0xFFEF4444), size: 24),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'This order has been cancelled.',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFEF4444),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      if (order['cancelReason'] != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: _card,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            'Reason: ${order['cancelReason']}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF475569),
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isActive || isCompleted
-                          ? const Color(0xFF64748B)
-                          : const Color(0xFFCBD5E1),
-                    ),
-                  ),
+                      ],
 
-                  // Lottie Animation for active step
-                  if (isActive) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF3F6FD8).withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Center(
-                        child: Lottie.asset(
-                          lottieFile,
-                          height: 100,
-                          repeat: true,
-                          fit: BoxFit.contain,
+                      const SizedBox(height: 24),
+
+                      // DELIVERY AGENT CARD (shown when assigned)
+                      if (order['driverName'] != null) ...[ 
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Delivery Agent',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: _card,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: _gold.withValues(alpha: 0.3)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              )
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 26,
+                                backgroundColor: _gold.withValues(alpha: 0.15),
+                                child: Text(
+                                  ((order['driverName'] as String?) ?? 'D').isNotEmpty
+                                      ? (order['driverName'] as String)[0].toUpperCase()
+                                      : 'D',
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                    color: _navy,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      order['driverName'] ?? 'Delivery Agent',
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800,
+                                        color: _navy,
+                                      ),
+                                    ),
+                                    if (order['driverPhone'] != null)
+                                      Text(
+                                        order['driverPhone'],
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF64748B),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (order['driverPhone'] != null)
+                                GestureDetector(
+                                  onTap: () {
+                                    Clipboard.setData(ClipboardData(text: order['driverPhone']));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Phone number copied'),
+                                        behavior: SnackBarBehavior.floating,
+                                        backgroundColor: Color(0xFF0A1628),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: _gold.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(Icons.phone_rounded, color: _navy, size: 20),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // ORDER DETAILS
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Order Details',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
                         ),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: _card,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            )
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            _infoRow('Total Amount',
+                                '₹${(order['totalAmount'] ?? 0).toStringAsFixed(0)}'),
+                            _infoRow(
+                                'Payment',
+                                order['paymentMethod'] == 'cod'
+                                    ? 'Cash on Delivery'
+                                    : 'Online'),
+                            if (order['pickupDate'] != null)
+                              _infoRow(
+                                'Pickup Date',
+                                _safeFormatPickupDate(order['pickupDate']),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildEstimatedTimeCard() {
-    String estimatedTime = "";
-    IconData timeIcon = Icons.access_time_rounded;
+  Widget _infoRow(String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF475569))),
+            Text(value,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0A1628))),
+          ],
+        ),
+      );
 
-    switch (status) {
-      case OrderStatus.pickup:
-        estimatedTime = "Arriving in 15-20 mins";
+  /// Safely format pickupDate — handles both String (dd/mm/yyyy) and Timestamp
+  String _safeFormatPickupDate(dynamic val) {
+    if (val == null) return '';
+    if (val is String) return val;                     // already formatted string
+    if (val is Timestamp) {
+      final dt = val.toDate();
+      return '${dt.day}/${dt.month}/${dt.year}';
+    }
+    return val.toString();
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  const _StatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    switch (status.toLowerCase()) {
+      case 'pending':
+        color = const Color(0xFFF59E0B);
         break;
-      case OrderStatus.processing:
-        estimatedTime = "Ready by tomorrow 6 PM";
+      case 'pickup':
+        color = const Color(0xFF3B82F6);
         break;
-      case OrderStatus.delivery:
-        estimatedTime = "Delivering in 30 mins";
+      case 'processing':
+        color = const Color(0xFF8B5CF6);
         break;
+      case 'delivery':
+        color = const Color(0xFFF59E0B);
+        break;
+      case 'completed':
+        color = const Color(0xFF10B981);
+        break;
+      case 'cancelled':
+        color = const Color(0xFFEF4444);
+        break;
+      default:
+        color = const Color(0xFF94A3B8);
     }
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF3F6FD8).withValues(alpha: 0.1),
-            const Color(0xFF3F6FD8).withValues(alpha: 0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFF3F6FD8).withValues(alpha: 0.2),
-          width: 1.5,
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        status.toUpperCase(),
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: color,
+          letterSpacing: 0.5,
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3F6FD8),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF3F6FD8).withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Icon(
-              timeIcon,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Estimated Time",
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF64748B),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  estimatedTime,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0A1628),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
-  }
-
-  Widget _buildActionButtons(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: SizedBox(
-            height: 54,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                // Contact support
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF3F6FD8),
-                side: const BorderSide(
-                  color: Color(0xFF3F6FD8),
-                  width: 2,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: const Icon(Icons.headset_mic_rounded),
-              label: const Text(
-                "Support",
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: SizedBox(
-            height: 54,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF3F6FD8),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shadowColor: Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: const Icon(Icons.home_rounded),
-              label: const Text(
-                "Home",
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _infoRow(IconData icon, String label, String value) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color: const Color(0xFF64748B),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            color: Color(0xFF64748B),
-          ),
-        ),
-        const Spacer(),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF0A1628),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Color _getStatusColor() {
-    switch (status) {
-      case OrderStatus.pickup:
-        return const Color(0xFF3B82F6);
-      case OrderStatus.processing:
-        return const Color(0xFFF59E0B);
-      case OrderStatus.delivery:
-        return const Color(0xFF10B981);
-    }
-  }
-
-  String _getStatusText() {
-    switch (status) {
-      case OrderStatus.pickup:
-        return "Pickup Scheduled";
-      case OrderStatus.processing:
-        return "Processing";
-      case OrderStatus.delivery:
-        return "Out for Delivery";
-    }
   }
 }

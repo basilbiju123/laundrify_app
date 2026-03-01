@@ -203,22 +203,23 @@ class OrderService {
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 12),
-              RadioGroup<String>(
-                groupValue: selectedReason,
-                onChanged: (value) {
-                  setState(() => selectedReason = value);
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: reasons.map((reason) {
-                    return RadioListTile<String>(
-                      title: Text(reason, style: const TextStyle(fontSize: 14)),
-                      value: reason,
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    );
-                  }).toList(),
-                ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: reasons.map((reason) {
+                  final isSelected = selectedReason == reason;
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () => setState(() => selectedReason = reason),
+                    leading: Icon(
+                      isSelected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                    ),
+                    title: Text(reason, style: const TextStyle(fontSize: 14)),
+                  );
+                }).toList(),
               ),
               if (selectedReason == 'Other') ...[
                 const SizedBox(height: 8),

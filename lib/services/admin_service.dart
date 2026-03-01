@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '../services/role_based_auth_service.dart';
+import '../models/firestore_models.dart';
 
 class AdminService {
   static final AdminService _instance = AdminService._internal();
@@ -52,6 +52,9 @@ class AdminService {
           break;
         case UserRole.delivery:
           accessibleRoles = ['delivery', 'user'];
+          break;
+        case UserRole.staff:
+          accessibleRoles = ['staff', 'user'];
           break;
         case UserRole.user:
           accessibleRoles = ['user'];
