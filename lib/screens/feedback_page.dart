@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -7,9 +8,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // compliments, or general feedback. Stored in Firestore.
 // ═══════════════════════════════════════════════════════════
 
-const _fNavy = Color(0xFF080F1E);
-const _fCard = Color(0xFF111827);
-const _fBorder = Color(0xFF1C2537);
 const _fBlue = Color(0xFF1B4FD8);
 const _fBlueSoft = Color(0xFF3B82F6);
 const _fGreen = Color(0xFF10B981);
@@ -95,7 +93,7 @@ class _FeedbackPageState extends State<FeedbackPage> {
           .get();
       final userData = userDoc.data() ?? {};
 
-      await FirebaseFirestore.instance.collection('feedbacks').add({
+      final feedbackData = {
         'userId': user.uid,
         'userName': userData['name'] ?? user.displayName ?? 'Anonymous',
         'userEmail': userData['email'] ?? user.email ?? '',
@@ -105,9 +103,28 @@ class _FeedbackPageState extends State<FeedbackPage> {
         'message': _messageCtrl.text.trim(),
         'orderId': widget.orderId ?? '',
         'orderSummary': widget.orderSummary ?? '',
-        'status': 'pending', // admin can update: pending | reviewed | resolved
+        'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
+
+      // Always write to user's own subcollection — always permitted
+      final userFeedbackRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('feedbacks')
+          .doc();
+      await userFeedbackRef.set({...feedbackData, 'feedbackId': userFeedbackRef.id});
+
+      // Also attempt top-level write for admin dashboard visibility.
+      // Requires Firestore rule: allow create if request.auth.uid == request.resource.data.userId
+      try {
+        await FirebaseFirestore.instance.collection('feedbacks').add({
+          ...feedbackData,
+          'userFeedbackPath': 'users/${user.uid}/feedbacks/${userFeedbackRef.id}',
+        });
+      } catch (_) {
+        // Top-level write denied by rules — user subcollection write already succeeded
+      }
 
       setState(() {
         _isSubmitting = false;
@@ -130,8 +147,9 @@ class _FeedbackPageState extends State<FeedbackPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _fNavy,
+      backgroundColor: t.bg,
       body: SafeArea(
         child: _submitted ? _buildSuccessView() : _buildFormView(),
       ),
@@ -190,6 +208,7 @@ class _FeedbackPageState extends State<FeedbackPage> {
 
   // ── Form View ─────────────────────────────────────────────
   Widget _buildFormView() {
+    final t = AppColors.of(context);
     return Column(
       children: [
         // Header
@@ -272,6 +291,7 @@ class _FeedbackPageState extends State<FeedbackPage> {
                   const SizedBox(height: 10),
                   Row(
                     children: _categories.map((cat) {
+                      final t = AppColors.of(context);
                       final isSelected = _selectedCategory == cat['id'];
                       final color = cat['color'] as Color;
                       return Expanded(
@@ -281,10 +301,10 @@ class _FeedbackPageState extends State<FeedbackPage> {
                             margin: const EdgeInsets.only(right: 8),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             decoration: BoxDecoration(
-                              color: isSelected ? color.withValues(alpha: 0.15) : _fCard,
+                              color: isSelected ? color.withValues(alpha: 0.15) : t.card,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: isSelected ? color.withValues(alpha: 0.5) : _fBorder,
+                                color: isSelected ? color.withValues(alpha: 0.5) : t.cardBdr,
                                 width: isSelected ? 1.5 : 1,
                               ),
                             ),
@@ -319,9 +339,9 @@ class _FeedbackPageState extends State<FeedbackPage> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: _fCard,
+                      color: t.card,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _fBorder),
+                      border: Border.all(color: t.cardBdr),
                     ),
                     child: Column(
                       children: [
@@ -382,15 +402,15 @@ class _FeedbackPageState extends State<FeedbackPage> {
                       hintText: 'Tell us about your experience, what went wrong, or how we can improve...',
                       hintStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
                       filled: true,
-                      fillColor: _fCard,
+                      fillColor: t.card,
                       counterStyle: const TextStyle(color: Color(0xFF475569)),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: _fBorder),
+                        borderSide: BorderSide(color: t.cardBdr),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: _fBorder),
+                        borderSide: BorderSide(color: t.cardBdr),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),

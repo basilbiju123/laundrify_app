@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme/app_theme.dart';
 import 'schedule_order_page.dart';
+import 'location_page.dart';
 import 'laundry_items_page.dart';
 import 'dryclean_items_page.dart';
 import 'shoe_items_page.dart';
@@ -14,8 +18,6 @@ const _oBlue = Color(0xFF1B4FD8);
 const _oGold = Color(0xFFF5C518);
 const _oGoldSft = Color(0xFFFDE68A);
 const _oGreen = Color(0xFF10B981);
-const _oSurface = Color(0xFFF0F4FF);
-const _oDark = Color(0xFF0A1628);
 const _oFade = Color(0xFF94A3B8);
 
 Color _oAccent(String n) {
@@ -149,7 +151,84 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
     ));
   }
 
-  void _bookNow() {
+  Future<void> _bookNow() async {
+    // Check if user has a saved location before allowing order placement
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = doc.data();
+      final location = data?['location'];
+      final hasLocation = location != null &&
+          location is Map &&
+          (location['address'] != null || location['detectedAddress'] != null);
+
+      if (!hasLocation) {
+        if (!mounted) return;
+        // Show dialog prompting to add location
+        final goToLocation = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            backgroundColor: Colors.white,
+            title: const Row(
+              children: [
+                Icon(Icons.location_off_rounded,
+                    color: Color(0xFFEF4444), size: 22),
+                SizedBox(width: 10),
+                Text('No Location Set',
+                    style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0A1628))),
+              ],
+            ),
+            content: const Text(
+              'Please add your pickup & delivery address before placing an order.',
+              style: TextStyle(fontSize: 14, color: Color(0xFF475569)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel',
+                    style: TextStyle(
+                        color: Color(0xFF94A3B8), fontWeight: FontWeight.w600)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF5C518),
+                  foregroundColor: const Color(0xFF080F1E),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Add Location',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        );
+
+        if (goToLocation == true && mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const LocationPage()),
+          );
+        }
+        return;
+      }
+    } catch (_) {
+      // If we can't check, allow proceeding (fail open for better UX)
+    }
+
+    if (!mounted) return;
     Navigator.push(
         context,
         MaterialPageRoute(
@@ -207,7 +286,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
       isScrollControlled: true,
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.62,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
         child: Column(children: [
@@ -230,18 +309,17 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                   child: const Icon(Icons.add_circle_outline_rounded,
                       color: _oNavy, size: 22)),
               const SizedBox(width: 12),
-              const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Add More Services",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: _oDark)),
-                    SizedBox(height: 2),
-                    Text("Items merge into your running order",
-                        style: TextStyle(fontSize: 12, color: _oFade)),
-                  ]),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text("Add More Services",
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.of(context).textHi)),
+                const SizedBox(height: 2),
+                Text("Items merge into your running order",
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.of(context).textDim)),
+              ]),
             ]),
           ),
           const SizedBox(height: 16),
@@ -303,7 +381,9 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                               style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: added ? color : _oDark),
+                                  color: added
+                                      ? color
+                                      : AppColors.of(context).textHi),
                               textAlign: TextAlign.center),
                           if (added) ...[
                             const SizedBox(height: 2),
@@ -327,15 +407,16 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _oSurface,
+      backgroundColor: t.bg,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         flexibleSpace: Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
                 gradient: LinearGradient(
                     colors: [_oNavy, _oNavyMid],
                     begin: Alignment.topLeft,
@@ -454,7 +535,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   Widget _heroBand() {
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
           gradient: LinearGradient(
               colors: [_oNavy, _oNavyMid],
               begin: Alignment.topLeft,
@@ -508,6 +589,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   }
 
   Widget _serviceSection(String name, List<Map<String, dynamic>> items) {
+    final t = AppColors.of(context);
     final accent = _oAccent(name);
     final icon = _oIcon(name);
     final groupTotal = items.fold<double>(
@@ -517,12 +599,12 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       child: Container(
         decoration: BoxDecoration(
-            color: Colors.white,
+            color: t.card,
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: accent.withValues(alpha: 0.2)),
             boxShadow: [
               BoxShadow(
-                  color: accent.withValues(alpha: 0.08),
+                  color: accent.withValues(alpha: t.isDark ? 0.06 : 0.08),
                   blurRadius: 16,
                   offset: const Offset(0, 5))
             ]),
@@ -549,7 +631,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                           fontWeight: FontWeight.w900,
                           fontSize: 15))),
               Text("${items.length} item${items.length > 1 ? 's' : ''}",
-                  style: const TextStyle(fontSize: 12, color: _oFade)),
+                  style: TextStyle(fontSize: 12, color: t.textDim)),
               const SizedBox(width: 10),
               Text("₹${groupTotal.toStringAsFixed(0)}",
                   style: TextStyle(
@@ -560,6 +642,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
           ),
           // Item rows
           ...items.asMap().entries.map((e) {
+            final t = AppColors.of(context);
             final isLast = e.key == items.length - 1;
             final item = e.value;
             return Column(children: [
@@ -575,36 +658,35 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                           borderRadius: BorderRadius.circular(12)),
                       child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child:
-                              Image.asset(item['image'], fit: BoxFit.cover))),
+                          child: (item['image'] != null && (item['image'] as String).isNotEmpty)
+                              ? Image.asset(
+                                  item['image'] as String,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Icon(icon, color: accent, size: 24))
+                              : Icon(icon, color: accent, size: 24))),
                   const SizedBox(width: 12),
                   Expanded(
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                         Text(item['name'],
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
-                                color: _oDark)),
+                                color: t.textHi)),
                         const SizedBox(height: 3),
                         Text("₹${item['price']} × ${item['qty']}",
-                            style:
-                                const TextStyle(fontSize: 12, color: _oFade)),
+                            style: TextStyle(fontSize: 12, color: t.textDim)),
                       ])),
                   Text("₹${(item['qty'] as int) * (item['price'] as num)}",
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w900,
-                          color: _oDark)),
+                          color: t.textHi)),
                 ]),
               ),
               if (!isLast)
-                Divider(
-                    height: 1,
-                    indent: 16,
-                    endIndent: 16,
-                    color: Colors.grey.withValues(alpha: 0.1)),
+                Divider(height: 1, indent: 16, endIndent: 16, color: t.divider),
             ]);
           }),
         ]),
@@ -613,16 +695,18 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   }
 
   Widget _billCard() {
+    final t = AppColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-            color: Colors.white,
+            color: t.card,
             borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: t.cardBdr),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: Colors.black.withValues(alpha: t.isDark ? 0.2 : 0.05),
                   blurRadius: 16,
                   offset: const Offset(0, 5))
             ]),
@@ -633,49 +717,56 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                 decoration: BoxDecoration(
                     color: _oNavy.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.receipt_outlined,
-                    color: _oNavy, size: 20)),
+                child: Icon(Icons.receipt_outlined,
+                    color: t.isDark ? AppColors.gold : _oNavy, size: 20)),
             const SizedBox(width: 10),
-            const Text("Bill Details",
+            Text("Bill Details",
                 style: TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w900, color: _oDark)),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: t.textHi)),
           ]),
           const SizedBox(height: 18),
-          _bRow("Subtotal", "₹${subtotal.toStringAsFixed(0)}"),
+          _bRow("Subtotal", "₹${subtotal.toStringAsFixed(0)}", t),
           const SizedBox(height: 12),
-          _bRow("Delivery Fee", "₹${deliveryFee.toStringAsFixed(0)}"),
+          _bRow("Delivery Fee", "₹${deliveryFee.toStringAsFixed(0)}", t),
           const SizedBox(height: 12),
-          _bRow("GST (5%)", "₹${gst.toStringAsFixed(0)}"),
+          _bRow("GST (5%)", "₹${gst.toStringAsFixed(0)}", t),
           const SizedBox(height: 14),
-          Container(height: 1, color: const Color(0xFFF1F5F9)),
+          Divider(height: 1, color: t.divider),
           const SizedBox(height: 14),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text("Total",
+            Text("Total",
                 style: TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w900, color: _oDark)),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: t.textHi)),
             Text("₹${total.toStringAsFixed(0)}",
-                style: const TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w900, color: _oNavy)),
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: t.isDark ? AppColors.gold : _oNavy)),
           ]),
         ]),
       ),
     );
   }
 
-  Widget _bRow(String l, String v) => Row(
+  Widget _bRow(String l, String v, AppColors t) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(l, style: const TextStyle(fontSize: 14, color: _oFade)),
+          Text(l, style: TextStyle(fontSize: 14, color: t.textDim)),
           Text(v,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w700, color: _oDark)),
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w700, color: t.textHi)),
         ],
       );
 
   Widget _bottomBar() {
+    final t = AppColors.of(context);
     return Container(
       decoration: BoxDecoration(
-          color: Colors.white,
+          color: t.card,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           boxShadow: [
             BoxShadow(
@@ -686,46 +777,51 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
       padding: EdgeInsets.fromLTRB(
           20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Multi-service chips
+        // Multi-service chips — only show if more than 1 service, wrapped safely
         if (_serviceMap.length > 1) ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              const Text("Services: ",
-                  style: TextStyle(fontSize: 12, color: _oFade)),
-              ..._serviceMap.keys.map((name) {
-                final accent = _oAccent(name);
-                return Container(
-                    margin: const EdgeInsets.only(right: 6),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border:
-                            Border.all(color: accent.withValues(alpha: 0.3))),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(_oIcon(name), color: accent, size: 11),
-                      const SizedBox(width: 4),
-                      Text(name,
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: accent)),
-                    ]));
-              }),
-            ]),
+          SizedBox(
+            height: 28,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                Text("Services: ",
+                    style: TextStyle(fontSize: 12, color: t.textDim)),
+                ..._serviceMap.keys.map((name) {
+                  final accent = _oAccent(name);
+                  return Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: accent.withValues(alpha: 0.3))),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(_oIcon(name), color: accent, size: 11),
+                        const SizedBox(width: 4),
+                        Text(name,
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: accent)),
+                      ]));
+                }),
+              ]),
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
         ],
         Row(children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text("$totalItems item${totalItems != 1 ? 's' : ''}",
-                style: const TextStyle(fontSize: 12, color: _oFade)),
+                style: TextStyle(fontSize: 12, color: t.textDim)),
             const SizedBox(height: 2),
             Text("₹${total.toStringAsFixed(0)}",
-                style: const TextStyle(
-                    fontSize: 24, fontWeight: FontWeight.w900, color: _oDark)),
+                style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    color: t.textHi)),
           ]),
           const Spacer(),
           GestureDetector(
@@ -740,7 +836,11 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight)
                       : null,
-                  color: totalItems == 0 ? Colors.grey.shade200 : null,
+                  color: totalItems == 0
+                      ? (t.isDark
+                          ? const Color(0xFF1A2540)
+                          : Colors.grey.shade200)
+                      : null,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: totalItems > 0
                       ? [
@@ -753,9 +853,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Text("BOOK NOW",
                     style: TextStyle(
-                        color: totalItems > 0
-                            ? Colors.white
-                            : Colors.grey.shade400,
+                        color: totalItems > 0 ? Colors.white : t.textDim,
                         fontWeight: FontWeight.w900,
                         fontSize: 15,
                         letterSpacing: 0.5)),
@@ -768,8 +866,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(7)),
                     child: Icon(Icons.arrow_forward_rounded,
-                        color: totalItems > 0 ? _oGold : Colors.grey.shade400,
-                        size: 16)),
+                        color: totalItems > 0 ? _oGold : t.textDim, size: 16)),
               ]),
             ),
           ),

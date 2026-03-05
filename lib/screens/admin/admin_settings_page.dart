@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'admin_theme.dart';
+import '../../services/panel_theme_service.dart';
 
 // ═══════════════════════════════════════════════════════════
-// SETTINGS PAGE
+// ADMIN SETTINGS PAGE — with isolated dark-mode toggle
 // ═══════════════════════════════════════════════════════════
 class AdminSettingsPage extends StatefulWidget {
   const AdminSettingsPage({super.key});
@@ -13,16 +14,16 @@ class AdminSettingsPage extends StatefulWidget {
 
 class _AdminSettingsPageState extends State<AdminSettingsPage> {
   final _db = FirebaseFirestore.instance;
-  final _commCtrl = TextEditingController(text: '10');
-  final _minOrderCtrl = TextEditingController(text: '99');
-  final _phoneCtrl = TextEditingController(text: '+919876543210');
-  final _emailCtrl = TextEditingController(text: 'support@laundrify.com');
-  final _hoursCtrl = TextEditingController(text: '8 AM – 10 PM daily');
-  final _facebookCtrl = TextEditingController(text: 'https://facebook.com');
-  final _instagramCtrl = TextEditingController(text: 'https://instagram.com');
-  final _youtubeCtrl = TextEditingController(text: 'https://youtube.com');
-  bool _maintenanceMode = false;
-  bool _isSaving = false;
+  final _commCtrl        = TextEditingController(text: '10');
+  final _minOrderCtrl    = TextEditingController(text: '99');
+  final _phoneCtrl       = TextEditingController(text: '+919876543210');
+  final _emailCtrl       = TextEditingController(text: 'support@laundrify.com');
+  final _hoursCtrl       = TextEditingController(text: '8 AM – 10 PM daily');
+  final _facebookCtrl    = TextEditingController(text: 'https://facebook.com');
+  final _instagramCtrl   = TextEditingController(text: 'https://instagram.com');
+  final _youtubeCtrl     = TextEditingController(text: 'https://youtube.com');
+  bool _maintenanceMode  = false;
+  bool _isSaving         = false;
 
   @override
   void initState() { super.initState(); _loadSettings(); }
@@ -59,18 +60,23 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
     setState(() => _isSaving = true);
     try {
       await _db.collection('settings').doc('app').set({
-        'commission':     double.tryParse(_commCtrl.text) ?? 10,
-        'minOrderAmount': double.tryParse(_minOrderCtrl.text) ?? 99,
+        'commission':      double.tryParse(_commCtrl.text) ?? 10,
+        'minOrderAmount':  double.tryParse(_minOrderCtrl.text) ?? 99,
         'maintenanceMode': _maintenanceMode,
-        'supportPhone':   _phoneCtrl.text.trim(),
-        'supportEmail':   _emailCtrl.text.trim(),
-        'workingHours':   _hoursCtrl.text.trim(),
-        'facebookUrl':    _facebookCtrl.text.trim(),
-        'instagramUrl':   _instagramCtrl.text.trim(),
-        'youtubeUrl':     _youtubeCtrl.text.trim(),
+        'supportPhone':    _phoneCtrl.text.trim(),
+        'supportEmail':    _emailCtrl.text.trim(),
+        'workingHours':    _hoursCtrl.text.trim(),
+        'facebookUrl':     _facebookCtrl.text.trim(),
+        'instagramUrl':    _instagramCtrl.text.trim(),
+        'youtubeUrl':      _youtubeCtrl.text.trim(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Settings saved'), backgroundColor: AdminTheme.emerald, behavior: SnackBarBehavior.floating));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('✅ Settings saved'),
+            backgroundColor: AdminTheme.emerald,
+            behavior: SnackBarBehavior.floating));
+      }
     } catch (_) {} finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -78,16 +84,97 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Get the admin panel's isolated theme service
+    PanelThemeService? panelTheme;
+    try { panelTheme = PanelThemeScope.of(context); } catch (_) {}
+    final isDark = panelTheme?.isDark ?? (Theme.of(context).brightness == Brightness.dark);
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
       physics: const BouncingScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AdminPageHeader(title: 'Settings', subtitle: 'Configure app and business settings'),
+          AdminPageHeader(
+              title: 'Settings',
+              subtitle: 'Configure app, appearance and business settings'),
           const SizedBox(height: 24),
 
-          // APP SETTINGS
+          // ── APPEARANCE ────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: AdminTheme.cardDecoration(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sectionHeader(Icons.palette_rounded, 'Appearance'),
+                const SizedBox(height: 16),
+
+                // Dark Mode Toggle
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF1A2540)
+                        : AdminTheme.bg,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: isDark
+                            ? const Color(0xFF2D3A52)
+                            : AdminTheme.cardBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                            color: AdminTheme.gold.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10)),
+                        child: Icon(
+                            isDark
+                                ? Icons.light_mode_rounded
+                                : Icons.dark_mode_rounded,
+                            color: AdminTheme.gold,
+                            size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('Dark Mode',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark
+                                      ? Colors.white
+                                      : AdminTheme.textPrimary)),
+                          Text('Toggle dark theme for Admin panel only',
+                              style: AdminTheme.label(12)),
+                        ]),
+                      ),
+                      Switch(
+                        value: isDark,
+                        onChanged: panelTheme == null
+                            ? null
+                            : (v) async {
+                                await panelTheme!.setDark(v);
+                                if (mounted) setState(() {});
+                              },
+                        activeThumbColor: AdminTheme.gold,
+                        activeTrackColor:
+                            AdminTheme.gold.withValues(alpha: 0.3),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── APP CONFIGURATION ─────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
             decoration: AdminTheme.cardDecoration(),
@@ -96,42 +183,83 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
               children: [
                 _sectionHeader(Icons.settings_rounded, 'App Configuration'),
                 const SizedBox(height: 20),
-
-                _buildSettingField(_commCtrl, 'Commission Rate (%)', Icons.percent_rounded, keyboard: TextInputType.number),
+                _buildSettingField(_commCtrl, 'Commission Rate (%)',
+                    Icons.percent_rounded,
+                    keyboard: TextInputType.number),
                 const SizedBox(height: 14),
-                _buildSettingField(_minOrderCtrl, 'Minimum Order Amount (₹)', Icons.currency_rupee_rounded, keyboard: TextInputType.number),
+                _buildSettingField(_minOrderCtrl,
+                    'Minimum Order Amount (₹)', Icons.currency_rupee_rounded,
+                    keyboard: TextInputType.number),
                 const SizedBox(height: 20),
 
                 // MAINTENANCE MODE TOGGLE
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: _maintenanceMode ? AdminTheme.rose.withValues(alpha: 0.1) : AdminTheme.card,
+                    color: _maintenanceMode
+                        ? AdminTheme.rose.withValues(alpha: 0.1)
+                        : AdminTheme.card,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: _maintenanceMode ? AdminTheme.rose.withValues(alpha: 0.3) : AdminTheme.cardBorder),
+                    border: Border.all(
+                        color: _maintenanceMode
+                            ? AdminTheme.rose.withValues(alpha: 0.3)
+                            : AdminTheme.cardBorder),
                   ),
                   child: Row(
                     children: [
-                      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: AdminTheme.rose.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.construction_rounded, color: AdminTheme.rose, size: 20)),
+                      Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                              color: AdminTheme.rose.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.construction_rounded,
+                              color: AdminTheme.rose, size: 20)),
                       const SizedBox(width: 12),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('Maintenance Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AdminTheme.textPrimary)),
-                        Text('Disable app for all users temporarily', style: AdminTheme.label(12)),
-                      ])),
-                      Switch(value: _maintenanceMode, onChanged: (v) => setState(() => _maintenanceMode = v), activeThumbColor: AdminTheme.rose, activeTrackColor: AdminTheme.rose.withValues(alpha: 0.3)),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const Text('Maintenance Mode',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: AdminTheme.textPrimary)),
+                            Text('Disable app for all users temporarily',
+                                style: AdminTheme.label(12)),
+                          ])),
+                      Switch(
+                          value: _maintenanceMode,
+                          onChanged: (v) =>
+                              setState(() => _maintenanceMode = v),
+                          activeThumbColor: AdminTheme.rose,
+                          activeTrackColor:
+                              AdminTheme.rose.withValues(alpha: 0.3)),
                     ],
                   ),
                 ),
 
                 const SizedBox(height: 20),
-
                 SizedBox(
-                  width: double.infinity, height: 52,
+                  width: double.infinity,
+                  height: 52,
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: AdminTheme.gold, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AdminTheme.gold,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0),
                     onPressed: _isSaving ? null : _saveSettings,
-                    child: _isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('SAVE SETTINGS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('SAVE SETTINGS',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2)),
                   ),
                 ),
               ],
@@ -140,35 +268,61 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
 
           const SizedBox(height: 16),
 
-          // CONTACT INFO CARD
+          // ── CONTACT INFO ──────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
             decoration: AdminTheme.cardDecoration(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _sectionHeader(Icons.contact_phone_rounded, 'Contact & Social Links'),
-                const Text('These appear on the Help page visible to all users.', style: TextStyle(fontSize: 11, color: AdminTheme.textMuted)),
+                _sectionHeader(
+                    Icons.contact_phone_rounded, 'Contact & Social Links'),
+                const Text(
+                    'These appear on the Help page visible to all users.',
+                    style: TextStyle(
+                        fontSize: 11, color: AdminTheme.textMuted)),
                 const SizedBox(height: 16),
-                _buildSettingField(_phoneCtrl, 'Support Phone', Icons.phone_rounded, keyboard: TextInputType.phone),
+                _buildSettingField(
+                    _phoneCtrl, 'Support Phone', Icons.phone_rounded,
+                    keyboard: TextInputType.phone),
                 const SizedBox(height: 12),
-                _buildSettingField(_emailCtrl, 'Support Email', Icons.email_rounded, keyboard: TextInputType.emailAddress),
+                _buildSettingField(
+                    _emailCtrl, 'Support Email', Icons.email_rounded,
+                    keyboard: TextInputType.emailAddress),
                 const SizedBox(height: 12),
-                _buildSettingField(_hoursCtrl, 'Working Hours', Icons.access_time_rounded),
+                _buildSettingField(
+                    _hoursCtrl, 'Working Hours', Icons.access_time_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(_facebookCtrl, 'Facebook URL', Icons.facebook_rounded),
+                _buildSettingField(
+                    _facebookCtrl, 'Facebook URL', Icons.facebook_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(_instagramCtrl, 'Instagram URL', Icons.camera_alt_rounded),
+                _buildSettingField(_instagramCtrl, 'Instagram URL',
+                    Icons.camera_alt_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(_youtubeCtrl, 'YouTube URL', Icons.play_circle_fill_rounded),
+                _buildSettingField(_youtubeCtrl, 'YouTube URL',
+                    Icons.play_circle_fill_rounded),
                 const SizedBox(height: 20),
                 SizedBox(
-                  width: double.infinity, height: 52,
+                  width: double.infinity,
+                  height: 52,
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: AdminTheme.gold, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AdminTheme.gold,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0),
                     onPressed: _isSaving ? null : _saveSettings,
-                    child: _isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('SAVE ALL SETTINGS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('SAVE ALL SETTINGS',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2)),
                   ),
                 ),
               ],
@@ -177,7 +331,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
 
           const SizedBox(height: 16),
 
-          // ABOUT CARD
+          // ── ABOUT ─────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
             decoration: AdminTheme.cardDecoration(),
@@ -200,32 +354,58 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
   }
 
   Widget _sectionHeader(IconData icon, String title) => Row(children: [
-    Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: AdminTheme.gold.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: AdminTheme.gold, size: 18)),
-    const SizedBox(width: 12),
-    Text(title, style: AdminTheme.heading(15)),
-  ]);
+        Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: AdminTheme.gold.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, color: AdminTheme.gold, size: 18)),
+        const SizedBox(width: 12),
+        Text(title, style: AdminTheme.heading(15)),
+      ]);
 
-  Widget _buildSettingField(TextEditingController ctrl, String label, IconData icon, {TextInputType? keyboard}) {
+  Widget _buildSettingField(
+      TextEditingController ctrl, String label, IconData icon,
+      {TextInputType? keyboard}) {
     return TextField(
-      controller: ctrl, keyboardType: keyboard,
+      controller: ctrl,
+      keyboardType: keyboard,
       style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
       decoration: InputDecoration(
-        labelText: label, labelStyle: AdminTheme.label(13),
-        prefixIcon: Icon(icon, color: AdminTheme.textSecondary, size: 20),
-        filled: true, fillColor: AdminTheme.bg,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AdminTheme.gold, width: 2)),
+        labelText: label,
+        labelStyle: AdminTheme.label(13),
+        prefixIcon:
+            Icon(icon, color: AdminTheme.textSecondary, size: 20),
+        filled: true,
+        fillColor: AdminTheme.bg,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AdminTheme.cardBorder)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AdminTheme.cardBorder)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide:
+                const BorderSide(color: AdminTheme.gold, width: 2)),
       ),
     );
   }
 
   Widget _infoRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Row(children: [
-      SizedBox(width: 100, child: Text(label, style: AdminTheme.label(13))),
-      Expanded(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AdminTheme.textPrimary))),
-    ]),
-  );
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(children: [
+          SizedBox(
+              width: 100,
+              child: Text(label, style: AdminTheme.label(13))),
+          Expanded(
+              child: Text(value,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AdminTheme.textPrimary))),
+        ]),
+      );
 }

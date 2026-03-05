@@ -85,30 +85,48 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
           ),
         ),
         const SizedBox(height: 16),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 24),
-          decoration: BoxDecoration(
-              color: AdminTheme.card,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AdminTheme.cardBorder)),
-          child: TabBar(
-            controller: _tabCtrl,
-            isScrollable: true,
-            indicator: BoxDecoration(
-                color: AdminTheme.gold.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: AdminTheme.gold.withValues(alpha: 0.4))),
-            labelColor: AdminTheme.gold,
-            unselectedLabelColor: AdminTheme.textSecondary,
-            labelStyle:
-                const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-            unselectedLabelStyle:
-                const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            tabAlignment: TabAlignment.start,
-            dividerColor: Colors.transparent,
-            padding: const EdgeInsets.all(6),
-            tabs: _statuses.map((s) => Tab(text: s.toUpperCase())).toList(),
+        // Pill-style status filter
+        SizedBox(
+          height: 44,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            itemCount: _statuses.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final s = _statuses[i];
+              final active = _filterStatus == s;
+              return GestureDetector(
+                onTap: () => setState(() {
+                  _filterStatus = s;
+                  _tabCtrl.animateTo(i);
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: active ? AdminTheme.gold.withValues(alpha: 0.15) : AdminTheme.card,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: active ? AdminTheme.gold : AdminTheme.cardBorder,
+                      width: active ? 1.5 : 1,
+                    ),
+                    boxShadow: active ? [
+                      BoxShadow(color: AdminTheme.gold.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 2))
+                    ] : null,
+                  ),
+                  child: Text(
+                    s.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: active ? AdminTheme.gold : AdminTheme.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 16),
@@ -153,7 +171,7 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
               }
 
               return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
                 physics: const BouncingScrollPhysics(),
                 itemCount: docs.length,
                 itemBuilder: (_, i) => _AdminOrderCard(doc: docs[i]),
@@ -282,7 +300,7 @@ class _AdminOrderCard extends StatelessWidget {
       builder: (_) => StatefulBuilder(
         builder: (ctx2, setLocal) => Container(
           height: MediaQuery.of(ctx).size.height * 0.92,
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
               color: AdminTheme.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
           child: Column(children: [

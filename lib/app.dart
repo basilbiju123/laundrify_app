@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'main.dart' show navigatorKey;
 import 'services/theme_service.dart';
 import 'app_entry_point.dart';
+import 'theme/app_theme.dart';
 
 class LaundrifyApp extends StatelessWidget {
   const LaundrifyApp({super.key});
@@ -9,7 +10,6 @@ class LaundrifyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeService = ThemeService();
-
     return ListenableBuilder(
       listenable: themeService,
       builder: (context, _) {
@@ -18,8 +18,8 @@ class LaundrifyApp extends StatelessWidget {
           title: 'Laundrify',
           navigatorKey: navigatorKey,
           themeMode: themeService.themeMode,
-          theme: ThemeService.lightTheme,
-          darkTheme: ThemeService.darkTheme,
+          theme: AppThemeData.light(),
+          darkTheme: AppThemeData.dark(),
           home: const AppEntryPoint(),
         );
       },

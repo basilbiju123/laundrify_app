@@ -187,7 +187,7 @@ class _SignupPageState extends State<SignupPage> with TickerProviderStateMixin {
       body: Container(
         width: size.width,
         height: size.height,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -302,7 +302,7 @@ class _SignupPageState extends State<SignupPage> with TickerProviderStateMixin {
                     child: Container(
                       height: 110,
                       width: 110,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Colors.white,
                         shape: BoxShape.circle,
                       ),

@@ -67,7 +67,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
               return Column(
                 children: [
-                  // SUMMARY CARD
+                  // SUMMARY CARD — only shown when viewing all transactions
+                  if (_filter == 'all')
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
                     child: Container(
@@ -88,7 +89,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
                   Expanded(
                     child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
                       physics: const BouncingScrollPhysics(),
                       itemCount: docs.length,
                       itemBuilder: (_, i) {

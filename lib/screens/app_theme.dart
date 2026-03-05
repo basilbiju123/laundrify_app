@@ -285,3 +285,61 @@ class LOnlineDot extends StatelessWidget {
     ),
   );
 }
+
+
+// ─── DynTheme: context-aware version for pages that use LTheme / static colors ─
+// Usage: final lt = DynTheme.of(context); → lt.bg, lt.card, lt.textHi …
+class DynTheme {
+  final bool isDark;
+  const DynTheme._({required this.isDark});
+
+  Color get bg       => isDark ? const Color(0xFF0A1628) : const Color(0xFFF0F4FF);
+  Color get surface  => isDark ? const Color(0xFF111827) : const Color(0xFFF8FAFF);
+  Color get card     => isDark ? const Color(0xFF1A2540) : Colors.white;
+  Color get cardBdr  => isDark ? const Color(0xFF2D3A52) : const Color(0xFFE8EDF5);
+  Color get input    => isDark ? const Color(0xFF1A2540) : Colors.white;
+
+  static const Color navy     = Color(0xFF080F1E);
+  static const Color navyMid  = Color(0xFF0D1F3C);
+  static const Color gold     = Color(0xFFF5C518);
+  static const Color goldSoft = Color(0xFFFDE68A);
+  static const Color blue     = Color(0xFF1B4FD8);
+  static const Color blueSoft = Color(0xFF3B82F6);
+  static const Color emerald  = Color(0xFF10B981);
+  static const Color amber    = Color(0xFFF59E0B);
+  static const Color rose     = Color(0xFFEF4444);
+  static const Color violet   = Color(0xFF8B5CF6);
+  static const Color cyan     = Color(0xFF06B6D4);
+
+  Color get textHi  => isDark ? Colors.white            : const Color(0xFF0A1628);
+  Color get textMid => isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569);
+  Color get textDim => isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8);
+  Color get divider => isDark ? const Color(0xFF2D3A52) : const Color(0xFFE8EDF5);
+
+  static const LinearGradient headerGradient = LinearGradient(
+    colors: [navy, navyMid], begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
+  static const LinearGradient goldGradient = LinearGradient(
+    colors: [gold, goldSoft, gold], begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
+
+  static DynTheme of(BuildContext context) =>
+      DynTheme._(isDark: Theme.of(context).brightness == Brightness.dark);
+
+  BoxDecoration cardBox({Color? borderColor, bool glow = false, bool goldGlow = false}) =>
+      BoxDecoration(
+        color: card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor ?? cardBdr, width: borderColor != null ? 1.5 : 1),
+        boxShadow: goldGlow
+            ? [BoxShadow(color: gold.withValues(alpha: isDark ? 0.18 : 0.12), blurRadius: 16, offset: const Offset(0, 4))]
+            : glow
+                ? [BoxShadow(color: blue.withValues(alpha: isDark ? 0.18 : 0.12), blurRadius: 16, offset: const Offset(0, 4))]
+                : [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 3))],
+      );
+
+  TextStyle heading(double size, {Color? color}) => TextStyle(
+      fontSize: size, fontWeight: FontWeight.w900, color: color ?? textHi, letterSpacing: -0.5);
+  TextStyle label(double size) =>
+      TextStyle(fontSize: size, fontWeight: FontWeight.w600, color: textMid);
+}

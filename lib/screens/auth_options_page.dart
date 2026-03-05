@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,9 +9,10 @@ import 'location_page.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
 import 'dashboard.dart';
-import 'admin/admin_dashboard.dart';
+import 'admin_switcher.dart';
 import 'manager_dashboard.dart';
 import 'delivery_dashboard.dart';
+import 'employee_dashboard.dart';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 
@@ -101,6 +103,10 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
           final selectedRoute =
               await _roleService.showRoleSelectionDialog(context);
           if (selectedRoute != null && mounted) {
+            // Persist choice so next login auto-routes here
+            final prefs = await SharedPreferences.getInstance();
+            final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+            await prefs.setString('last_dashboard_$uid', selectedRoute);
             _navigateToDashboard(selectedRoute);
           }
         } else {
@@ -121,11 +127,13 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
               } catch (_) {}
             }
             if (!mounted) return;
-            if (hasLocation) {
-              _navigateToDashboard(route);
-            } else {
+            // Only show LocationPage if this is a brand-new user AND no location saved
+            final isNewUser = result['isNewUser'] == true;
+            if (!hasLocation && isNewUser) {
               Navigator.pushReplacement(context,
                   MaterialPageRoute(builder: (_) => const LocationPage()));
+            } else {
+              _navigateToDashboard(route);
             }
           } else {
             _navigateToDashboard(route);
@@ -164,13 +172,16 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
     Widget dashboardWidget;
     switch (route) {
       case '/admin-dashboard':
-        dashboardWidget = const AdminDashboard();
+        dashboardWidget = const AdminSwitcherWrapper();
         break;
       case '/manager-dashboard':
         dashboardWidget = const ManagerDashboard();
         break;
       case '/delivery-dashboard':
         dashboardWidget = const DeliveryDashboard();
+        break;
+      case '/employee-dashboard':
+        dashboardWidget = const EmployeeDashboard();
         break;
       case '/dashboard':
       default:
@@ -192,7 +203,7 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
       body: Container(
         width: size.width,
         height: size.height,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,

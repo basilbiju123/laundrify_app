@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // lottie import removed - replaced with icon fallback (no asset file)
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/windows_layout.dart';
+import '../theme/app_theme.dart';
 
 import 'laundry_items_page.dart';
 import 'dryclean_items_page.dart';
@@ -18,6 +20,7 @@ import 'location_page.dart';
 import 'notifications_page.dart';
 import 'profile_page.dart';
 import 'orders_page.dart';
+import 'cancel_order_page.dart';
 import 'loyalty_page.dart';
 import 'help_page.dart';
 import 'settings_page.dart';
@@ -36,7 +39,6 @@ const _blue = Color(0xFF1B4FD8);
 const _blueSoft = Color(0xFF3B82F6);
 const _gold = Color(0xFFF5C518);
 const _goldSoft = Color(0xFFFDE68A);
-const _surface = Color(0xFFF0F4FF);
 const _textDark = Color(0xFF0A1628);
 const _textMid = Color(0xFF475569);
 const _textFade = Color(0xFF94A3B8);
@@ -184,6 +186,16 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
+  String _fmtDate(dynamic val) {
+    if (val == null) return '';
+    if (val is String) return val;
+    if (val is Timestamp) {
+      final dt = val.toDate();
+      return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+    }
+    return val.toString();
+  }
+
   // ── Services ─────────────────────────────────────────────────────────────
   List<Map<String, dynamic>> get _services => [
         {
@@ -286,36 +298,8 @@ class _DashboardPageState extends State<DashboardPage>
           setState(() => completedOrders = orders);
         }
 
-        // Check for real active order from Firestore
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          try {
-            final activeSnap = await FirebaseFirestore.instance
-                .collection('orders')
-                .where('userId', isEqualTo: uid)
-                .where('status', whereNotIn: ['delivered', 'completed', 'cancelled'])
-                .orderBy('createdAt', descending: true)
-                .limit(1)
-                .get();
-            if (activeSnap.docs.isNotEmpty && mounted) {
-              final doc = activeSnap.docs.first;
-              final d = doc.data();
-              final firestoreStatus = d['status'] ?? 'pending';
-              OrderStatus mappedStatus = OrderStatus.pickup;
-              if (['processing', 'picked', 'reached'].contains(firestoreStatus)) {
-                mappedStatus = OrderStatus.processing;
-              } else if (['out_for_delivery', 'ready', 'delivered'].contains(firestoreStatus)) {
-                mappedStatus = OrderStatus.delivery;
-              }
-              setState(() {
-                hasActiveOrder = true;
-                activeOrderId = doc.id;
-                activeOrderData = d;
-                currentStatus = mappedStatus;
-              });
-            }
-          } catch (_) {}
-        }
+        // Active order is handled by StreamBuilder in _buildActiveOrderStream()
+        // No one-time .get() needed here — avoids flash/conflict
       }
     } catch (_) {}
   }
@@ -341,304 +325,294 @@ class _DashboardPageState extends State<DashboardPage>
   // ═════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final mobileScaffold = Stack(
-      children: [
-        Scaffold(
-          key: _scaffoldKey,
-          backgroundColor: _surface,
-          extendBodyBehindAppBar: true,
-          endDrawer: _drawer(),
-          bottomNavigationBar: _bottomNav(),
+    final t = AppColors.of(context);
+    final mobileScaffold = PopScope(
+      canPop: _currentTab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _currentTab != 0) {
+          setState(() => _currentTab = 0);
+        }
+      },
+      child: Stack(
+        children: [
+          Scaffold(
+            key: _scaffoldKey,
+            backgroundColor: t.bg,
+            extendBodyBehindAppBar: !kIsWeb,
+            endDrawer: _drawer(),
+            bottomNavigationBar: kIsWeb ? null : _bottomNav(),
 
-          // ── AppBar ─────────────────────────────────────────────────────
-          appBar: AppBar(
-            automaticallyImplyLeading: false,
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            systemOverlayStyle: SystemUiOverlayStyle.light,
-            flexibleSpace: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [_navy, _navyMid],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-            ),
-            title: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Image.asset("assets/images/logo.png",
-                        fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Text(
-                  "Laundrify",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              // Abandoned cart icon
-              StreamBuilder<QuerySnapshot>(
-                stream: user != null
-                    ? FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(user!.uid)
-                        .collection('abandoned_carts')
-                        .where('status', isEqualTo: 'abandoned')
-                        .snapshots()
-                    : null,
-                builder: (ctx, snap) {
-                  final count = snap.data?.docs.length ?? 0;
-                  if (count == 0) return const SizedBox.shrink();
-                  return IconButton(
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.shopping_cart_outlined,
-                            color: Colors.white, size: 24),
-                        Positioned(
-                          right: -3,
-                          top: -3,
-                          child: Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: const BoxDecoration(
-                                color: Color(0xFFEF4444),
-                                shape: BoxShape.circle),
-                            child: Text('$count',
-                                style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w900,
-                                    color: Colors.white)),
-                          ),
-                        ),
-                      ],
-                    ),
-                    onPressed: () => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => const AbandonedCartPage())),
-                  );
-                },
-              ),
-              // Bell with gold dot
-              IconButton(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.notifications_outlined,
-                        color: Colors.white, size: 25),
-                    Positioned(
-                      right: -1,
-                      top: -1,
-                      child: Container(
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          color: _gold,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: _navyMid, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const NotificationsPage(),
-                    ),
-                  );
-                },
-              ),
-              // Gold avatar
-              GestureDetector(
-                onTap: () => _scaffoldKey.currentState?.openEndDrawer(),
-                child: Container(
-                  margin: const EdgeInsets.only(right: 16, left: 4),
-                  child: user?.photoURL != null
-                      ? Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: _gold, width: 2),
-                          ),
-                          child: CircleAvatar(
-                            radius: 18,
-                            backgroundImage: NetworkImage(user!.photoURL!),
-                          ),
-                        )
-                      : Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [_gold, _goldSoft],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: _gold.withValues(alpha: 0.45),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Center(
-                            child: Text(
-                              profileLetter,
-                              style: const TextStyle(
-                                color: _navy,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                ),
-              ),
-            ],
-          ),
-
-          body: IndexedStack(
-            index: _currentTab,
-            children: [
-              // ── TAB 0: HOME ───────────────────────────────────────
-              FadeTransition(
-                opacity: _entryFade,
-                child: SlideTransition(
-                  position: _entrySlide,
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _hero(context),
-                        const SizedBox(height: 22),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _banner(),
-                              const SizedBox(height: 30),
-                              _sectionTitle("Our Services"),
-                              const SizedBox(height: 14),
-                              _servicesGrid(),
-                              const SizedBox(height: 30),
-                              _sectionTitle("Your Orders"),
-                              const SizedBox(height: 14),
-                              hasActiveOrder ? _activeOrderCard() : _emptyOrderCard(),
-                              const SizedBox(height: 14),
-                              _historyCard(),
-                              const SizedBox(height: 36),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // ── TAB 1: ORDERS ─────────────────────────────────────
-              const OrdersPage(),
-              // ── TAB 2: TRACK ──────────────────────────────────────
-              TrackOrderPage(orderId: activeOrderId ?? ''),
-              // ── TAB 3: LOYALTY ────────────────────────────────────
-              const LoyaltyPage(),
-              // ── TAB 4: PROFILE ────────────────────────────────────
-              const ProfilePage(),
-            ],
-          ),
-        ),
-
-        // ── ROBOT HELPER (logic unchanged) ────────────────────────────
-        if (showRobotHelper)
-          Container(
-            color: Colors.black.withValues(alpha: 0.65),
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(32),
-                margin: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(28),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 40,
-                      offset: const Offset(0, 16),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 100,
-                      height: 100,
+            // ── AppBar ─────────────────────────────────────────────────────
+            appBar: kIsWeb
+                ? null
+                : AppBar(
+                    automaticallyImplyLeading: false,
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    systemOverlayStyle: SystemUiOverlayStyle.light,
+                    flexibleSpace: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEEF2FF),
-                        shape: BoxShape.circle,
-                        boxShadow: [BoxShadow(color: const Color(0xFF1B4FD8).withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 8))],
-                      ),
-                      child: const Icon(Icons.local_laundry_service_rounded, size: 52, color: Color(0xFF1B4FD8)),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "Choose a service to\nbook your first order.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: _textDark,
-                        height: 1.4,
+                        gradient: LinearGradient(
+                          colors: [_navy, _navyMid],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: () =>
-                            setState(() => showRobotHelper = false),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _navy,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                    title: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          elevation: 0,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.asset("assets/images/logo.png",
+                                fit: BoxFit.cover),
+                          ),
                         ),
-                        child: const Text(
-                          "Got it!",
+                        const SizedBox(width: 10),
+                        const Text(
+                          "Laundrify",
                           style: TextStyle(
-                              fontWeight: FontWeight.w800, fontSize: 16),
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 20,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      // Abandoned cart icon
+                      StreamBuilder<QuerySnapshot>(
+                        stream: user != null
+                            ? FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(user!.uid)
+                                .collection('abandoned_carts')
+                                .where('status', isEqualTo: 'abandoned')
+                                .snapshots()
+                            : null,
+                        builder: (ctx, snap) {
+                          final count = snap.data?.docs.length ?? 0;
+                          if (count == 0) return const SizedBox.shrink();
+                          return IconButton(
+                            icon: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                const Icon(Icons.shopping_cart_outlined,
+                                    color: Colors.white, size: 24),
+                                Positioned(
+                                  right: -3,
+                                  top: -3,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: BoxDecoration(
+                                        color: Color(0xFFEF4444),
+                                        shape: BoxShape.circle),
+                                    child: Text('$count',
+                                        style: const TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w900,
+                                            color: Colors.white)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const AbandonedCartPage())),
+                          );
+                        },
+                      ),
+                      // Bell with gold dot
+                      IconButton(
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(Icons.notifications_outlined,
+                                color: Colors.white, size: 25),
+                            Positioned(
+                              right: -1,
+                              top: -1,
+                              child: Container(
+                                width: 9,
+                                height: 9,
+                                decoration: BoxDecoration(
+                                  color: _gold,
+                                  shape: BoxShape.circle,
+                                  border:
+                                      Border.all(color: _navyMid, width: 1.5),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const NotificationsPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      // Gold avatar
+                      GestureDetector(
+                        onTap: () => _scaffoldKey.currentState?.openEndDrawer(),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 16, left: 4),
+                          child: user?.photoURL != null
+                              ? Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: _gold, width: 2),
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: 18,
+                                    backgroundImage: null,
+                                    child: ClipOval(
+                                        child: Image.network(user!.photoURL!,
+                                            width: 36,
+                                            height: 36,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) => Container(
+                                                color: const Color(0xFFF5C518),
+                                                child: Center(
+                                                    child: Text(
+                                                        (user?.displayName ??
+                                                                user?.email ??
+                                                                'U')[0]
+                                                            .toUpperCase(),
+                                                        style: const TextStyle(
+                                                            fontSize: 14,
+                                                            fontWeight:
+                                                                FontWeight.w900,
+                                                            color: Color(
+                                                                0xFF080F1E))))))),
+                                  ),
+                                )
+                              : Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [_gold, _goldSoft],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _gold.withValues(alpha: 0.45),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      profileLetter,
+                                      style: const TextStyle(
+                                        color: _navy,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+
+            body: _buildTabBody(),
+          ),
+
+          // ── ROBOT HELPER (logic unchanged) ────────────────────────────
+          if (showRobotHelper)
+            Container(
+              color: Colors.black.withValues(alpha: 0.65),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.all(32),
+                  margin: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 40,
+                        offset: const Offset(0, 16),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEEF2FF),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                                color: const Color(0xFF1B4FD8)
+                                    .withValues(alpha: 0.15),
+                                blurRadius: 20,
+                                offset: const Offset(0, 8))
+                          ],
+                        ),
+                        child: const Icon(Icons.local_laundry_service_rounded,
+                            size: 52, color: Color(0xFF1B4FD8)),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Choose a service to\nbook your first order.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: _textDark,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () =>
+                              setState(() => showRobotHelper = false),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _navy,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            "Got it!",
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
     return WindowsLayout(
       title: 'Dashboard',
@@ -647,11 +621,64 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
+  // ── TAB BODY — avoids nested Scaffold black screens ─────────────────────
+  Widget _buildTabBody() {
+    switch (_currentTab) {
+      case 0:
+        return FadeTransition(
+          opacity: _entryFade,
+          child: SlideTransition(
+            position: _entrySlide,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _hero(context),
+                  const SizedBox(height: 22),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _banner(),
+                        const SizedBox(height: 30),
+                        _sectionTitle("Our Services"),
+                        const SizedBox(height: 14),
+                        _servicesGrid(),
+                        const SizedBox(height: 30),
+                        _sectionTitle("Your Orders"),
+                        const SizedBox(height: 14),
+                        _buildActiveOrderStream(),
+                        const SizedBox(height: 14),
+                        _historyCard(),
+                        const SizedBox(height: 36),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      case 1:
+        return const _NestedPage(child: OrdersPage());
+      case 2:
+        return _NestedPage(child: TrackOrderPage(orderId: activeOrderId ?? ''));
+      case 3:
+        return const _NestedPage(child: LoyaltyPage());
+      case 4:
+        return const _NestedPage(child: ProfilePage());
+      default:
+        return const SizedBox();
+    }
+  }
+
   // ── HERO ──────────────────────────────────────────────────────────────────
   Widget _hero(BuildContext context) {
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [_navy, _navyMid, Color(0xFF0D2D6B)],
           begin: Alignment.topCenter,
@@ -704,7 +731,11 @@ class _DashboardPageState extends State<DashboardPage>
 
           Padding(
             padding: EdgeInsets.only(
-              top: MediaQuery.of(context).padding.top + kToolbarHeight + 16,
+              // On web/Windows: _TopBar is already in WindowsLayout above the hero.
+              // On mobile: AppBar (kToolbarHeight) + status bar padding.
+              top: kIsWeb
+                  ? 16
+                  : MediaQuery.of(context).padding.top + kToolbarHeight + 16,
               left: 22,
               right: 22,
               bottom: 30,
@@ -932,11 +963,14 @@ class _DashboardPageState extends State<DashboardPage>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: (b['accent'] as Color).withValues(alpha: 0.25),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: (b['accent'] as Color).withValues(alpha: 0.5)),
+                          border: Border.all(
+                              color: (b['accent'] as Color)
+                                  .withValues(alpha: 0.5)),
                         ),
                         child: Text(
                           b['badge'] as String,
@@ -992,74 +1026,84 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _banner() {
-    return Container(
-      height: 175,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: _blue.withValues(alpha: 0.25),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(26),
-        child: Stack(
-          children: [
-            PageView.builder(
-              controller: _bannerController,
-              itemCount: _bannerData.length,
-              onPageChanged: (i) => setState(() => bannerIndex = i),
-              itemBuilder: (_, i) {
-                final b = _bannerData[i];
-                return _buildBannerSlide(b);
-              },
-            ),
-            Positioned(
-              bottom: 16,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(_bannerData.length, (i) {
-                  final active = bannerIndex == i;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 350),
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: active ? 28 : 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: active
-                          ? Colors.white
-                          : Colors.white.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  );
-                }),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bannerH = constraints.maxWidth > 500 ? 200.0 : 160.0;
+        return Container(
+          height: bannerH,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [
+              BoxShadow(
+                color: _blue.withValues(alpha: 0.25),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
               ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(26),
+            child: Stack(
+              children: [
+                PageView.builder(
+                  controller: _bannerController,
+                  itemCount: _bannerData.length,
+                  onPageChanged: (i) => setState(() => bannerIndex = i),
+                  itemBuilder: (_, i) {
+                    final b = _bannerData[i];
+                    return _buildBannerSlide(b);
+                  },
+                ),
+                Positioned(
+                  bottom: 16,
+                  left: 0,
+                  right: 0,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(_bannerData.length, (i) {
+                      final active = bannerIndex == i;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 350),
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: active ? 28 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: active
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
   // ── SERVICES GRID ─────────────────────────────────────────────────────────
   Widget _servicesGrid() {
-    return GridView.count(
-      key: _servicesKey,
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 0.85,
-      children: _services.map((s) {
-        return _serviceCard(s['title'], s['page'], s['img'], s['color']);
-      }).toList(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cols = constraints.maxWidth > 500 ? 4 : 3;
+        return GridView.count(
+          key: _servicesKey,
+          crossAxisCount: cols,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 0.85,
+          children: _services.map((s) {
+            return _serviceCard(s['title'], s['page'], s['img'], s['color']);
+          }).toList(),
+        );
+      },
     );
   }
 
@@ -1124,11 +1168,14 @@ class _DashboardPageState extends State<DashboardPage>
                 child: Text(
                   title,
                   textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
-                    fontSize: 11.5,
+                    fontSize: 11,
                     letterSpacing: 0.1,
+                    height: 1.2,
                     shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
                   ),
                 ),
@@ -1358,25 +1405,453 @@ class _DashboardPageState extends State<DashboardPage>
                       );
                     }),
                   ),
+                  // ── Date / Location ──────────────────────────────────
+                  if (savedLocation != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.location_on_rounded,
+                            color: _gold, size: 13),
+                        const SizedBox(width: 6),
+                        Expanded(
+                            child: Text(
+                          savedLocation!.replaceAll(RegExp(r'^[^:]+:\s*'), ''),
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.75)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )),
+                      ]),
+                    ),
+                  ],
                 ],
               ),
             ),
+            // Cancel order button
+            if (activeOrderId != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CancelOrderPage(
+                        orderId: activeOrderId!,
+                        orderData: activeOrderData ?? {},
+                      ),
+                    ),
+                  ),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                          color:
+                              const Color(0xFFEF4444).withValues(alpha: 0.3)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.cancel_outlined,
+                            color: Color(0xFFEF4444), size: 16),
+                        SizedBox(width: 6),
+                        Text("Cancel Order",
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFEF4444))),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
+  // ── ACTIVE ORDER STREAM — real-time, no flashing ──────────────────────────
+  Widget _buildActiveOrderStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return _emptyOrderCard();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('orders')
+          .where('userId', isEqualTo: uid)
+          .where('status', whereIn: [
+            'pending',
+            'assigned',
+            'accepted',
+            'pickup',
+            'picked',
+            'reached',
+            'processing',
+            'ready',
+            'out_for_delivery',
+          ])
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .snapshots(),
+      builder: (context, snap) {
+        // While waiting for first data — show last known state, not spinner
+        if (!snap.hasData) {
+          return hasActiveOrder ? _activeOrderCard() : _emptyOrderCard();
+        }
+
+        if (snap.data!.docs.isEmpty) {
+          // Update state if it changed
+          if (hasActiveOrder) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() {
+                  hasActiveOrder = false;
+                  activeOrderId = null;
+                  activeOrderData = null;
+                });
+              }
+            });
+          }
+          return _emptyOrderCard();
+        }
+
+        final doc = snap.data!.docs.first;
+        final d = doc.data() as Map<String, dynamic>;
+        final fStatus = d['status'] ?? 'pending';
+
+        OrderStatus mapped = OrderStatus.pickup;
+        if (['processing', 'picked', 'reached'].contains(fStatus)) {
+          mapped = OrderStatus.processing;
+        } else if (['out_for_delivery', 'ready', 'delivered']
+            .contains(fStatus)) {
+          mapped = OrderStatus.delivery;
+        }
+
+        // Keep state in sync without triggering a rebuild loop
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && (activeOrderId != doc.id || currentStatus != mapped)) {
+            setState(() {
+              hasActiveOrder = true;
+              activeOrderId = doc.id;
+              activeOrderData = d;
+              currentStatus = mapped;
+            });
+          }
+        });
+
+        return _activeOrderCardWithCancel(doc.id, d);
+      },
+    );
+  }
+
+  // ── ACTIVE ORDER CARD + CANCEL BUTTON ────────────────────────────────────
+  Widget _activeOrderCardWithCancel(String orderId, Map<String, dynamic> data) {
+    final stepIdx = OrderStatus.values.indexOf(currentStatus);
+    final steps = ["Pickup", "Processing", "Delivery"];
+    final status = data['status'] ?? 'pending';
+
+    // Can only cancel if not yet picked up
+    final canCancel = ['pending', 'confirmed', 'assigned'].contains(status);
+
+    return Column(
+      children: [
+        // ── Main card (same as before, tappable to track) ──
+        GestureDetector(
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => TrackOrderPage(orderId: orderId))),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [_navy, _navyCard],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                    color: _navy.withValues(alpha: 0.4),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10))
+              ],
+            ),
+            child: Stack(children: [
+              Positioned(
+                  right: -24,
+                  top: -24,
+                  child: Container(
+                      width: 110,
+                      height: 110,
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: statusColor.withValues(alpha: 0.1)))),
+              Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        ScaleTransition(
+                          scale: _pulse,
+                          child: Container(
+                            padding: const EdgeInsets.all(13),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: statusColor.withValues(alpha: 0.3)),
+                              boxShadow: [
+                                BoxShadow(
+                                    color: statusColor.withValues(alpha: 0.25),
+                                    blurRadius: 12)
+                              ],
+                            ),
+                            child:
+                                Icon(statusIcon, color: statusColor, size: 22),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text("Active Order",
+                                  style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.45),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.5)),
+                              const SizedBox(height: 3),
+                              Text(statusLabel,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.2)),
+                            ])),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                                color: statusColor.withValues(alpha: 0.35)),
+                          ),
+                          child: Text("Track →",
+                              style: TextStyle(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12)),
+                        ),
+                      ]),
+                      const SizedBox(height: 5),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 50),
+                        child: Text(statusSub,
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.42),
+                                fontSize: 12)),
+                      ),
+                      const SizedBox(height: 24),
+                      // Step progress
+                      Row(
+                          children: List.generate(steps.length, (i) {
+                        final done = i <= stepIdx;
+                        final active = i == stepIdx;
+                        return Expanded(
+                            child: Row(children: [
+                          Expanded(
+                              child: Column(children: [
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 450),
+                              width: active ? 30 : 22,
+                              height: active ? 30 : 22,
+                              decoration: BoxDecoration(
+                                color: done
+                                    ? statusColor
+                                    : Colors.white.withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: done
+                                        ? statusColor
+                                        : Colors.white.withValues(alpha: 0.18),
+                                    width: active ? 2.5 : 1.5),
+                                boxShadow: active
+                                    ? [
+                                        BoxShadow(
+                                            color: statusColor.withValues(
+                                                alpha: 0.5),
+                                            blurRadius: 12)
+                                      ]
+                                    : null,
+                              ),
+                              child: done
+                                  ? Icon(
+                                      active
+                                          ? Icons.circle
+                                          : Icons.check_rounded,
+                                      color: _navy,
+                                      size: active ? 10 : 12)
+                                  : null,
+                            ),
+                            const SizedBox(height: 7),
+                            Text(steps[i],
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: done
+                                        ? FontWeight.w800
+                                        : FontWeight.w400,
+                                    color: done
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.3))),
+                          ])),
+                          if (i < steps.length - 1)
+                            Expanded(
+                                child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 450),
+                              height: 2,
+                              margin: const EdgeInsets.only(bottom: 28),
+                              decoration: BoxDecoration(
+                                color: i < stepIdx
+                                    ? statusColor
+                                    : Colors.white.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            )),
+                        ]));
+                      })),
+                      // ── Date / Time / Location row ────────────────────
+                      if (data['pickupDate'] != null ||
+                          data['pickupTime'] != null ||
+                          savedLocation != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(children: [
+                            if (data['pickupDate'] != null) ...[
+                              const Icon(Icons.calendar_today_rounded,
+                                  color: Color(0xFFF5C518), size: 14),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                  child: Text(
+                                _fmtDate(data['pickupDate']),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withValues(alpha: 0.8)),
+                                overflow: TextOverflow.ellipsis,
+                              )),
+                              const SizedBox(width: 12),
+                            ],
+                            if (data['pickupTime'] != null) ...[
+                              const Icon(Icons.access_time_rounded,
+                                  color: Color(0xFFF5C518), size: 14),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                  child: Text(
+                                data['pickupTime'].toString(),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withValues(alpha: 0.8)),
+                                overflow: TextOverflow.ellipsis,
+                              )),
+                              const SizedBox(width: 12),
+                            ],
+                            if (savedLocation != null) ...[
+                              const Icon(Icons.location_on_rounded,
+                                  color: Color(0xFFF5C518), size: 14),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                  child: Text(
+                                savedLocation!
+                                    .replaceAll(RegExp(r'^[^:]+:\s*'), ''),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withValues(alpha: 0.8)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              )),
+                            ],
+                          ]),
+                        ),
+                      ],
+                    ]),
+              ),
+            ]),
+          ),
+        ),
+
+        // ── Cancel button (only shown when order can still be cancelled) ──
+        if (canCancel) ...[
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      CancelOrderPage(orderId: orderId, orderData: data),
+                )),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.cancel_outlined,
+                        color: Color(0xFFEF4444), size: 17),
+                    SizedBox(width: 8),
+                    Text('Cancel Order',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFEF4444))),
+                  ]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   // ── EMPTY ORDER CARD ──────────────────────────────────────────────────────
   Widget _emptyOrderCard() {
+    final t = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: t.card,
         borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: t.cardBdr),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: t.isDark ? 0.2 : 0.06),
             blurRadius: 22,
             offset: const Offset(0, 8),
           ),
@@ -1390,8 +1865,8 @@ class _DashboardPageState extends State<DashboardPage>
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  _blue.withValues(alpha: 0.1),
-                  _blueSoft.withValues(alpha: 0.05),
+                  _blue.withValues(alpha: 0.12),
+                  _blueSoft.withValues(alpha: 0.06),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -1405,19 +1880,19 @@ class _DashboardPageState extends State<DashboardPage>
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             "No active orders",
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w900,
-              color: _textDark,
+              color: t.textHi,
             ),
           ),
           const SizedBox(height: 7),
-          const Text(
+          Text(
             "Fresh clothes, zero effort.\nBook your first pickup today!",
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: _textMid, height: 1.55),
+            style: TextStyle(fontSize: 13, color: t.textMid, height: 1.55),
           ),
           const SizedBox(height: 24),
           SizedBox(
@@ -1472,11 +1947,13 @@ class _DashboardPageState extends State<DashboardPage>
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.of(context).card,
           borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.of(context).cardBdr),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Colors.black
+                  .withValues(alpha: AppColors.of(context).isDark ? 0.2 : 0.05),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -1499,7 +1976,7 @@ class _DashboardPageState extends State<DashboardPage>
               child: const Icon(Icons.history_rounded, color: _blue, size: 26),
             ),
             const SizedBox(width: 16),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1508,13 +1985,14 @@ class _DashboardPageState extends State<DashboardPage>
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
-                      color: _textDark,
+                      color: AppColors.of(context).textHi,
                     ),
                   ),
-                  SizedBox(height: 3),
+                  const SizedBox(height: 3),
                   Text(
                     "View all your past orders",
-                    style: TextStyle(fontSize: 12, color: _textFade),
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.of(context).textDim),
                   ),
                 ],
               ),
@@ -1537,6 +2015,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   // ── SECTION TITLE ─────────────────────────────────────────────────────────
   Widget _sectionTitle(String title) {
+    final t = AppColors.of(context);
     return Row(
       children: [
         Container(
@@ -1554,10 +2033,10 @@ class _DashboardPageState extends State<DashboardPage>
         const SizedBox(width: 10),
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
-            color: _textDark,
+            color: t.textHi,
             letterSpacing: -0.4,
           ),
         ),
@@ -1567,6 +2046,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   // ── DRAWER ────────────────────────────────────────────────────────────────
   Widget _drawer() {
+    final t = AppColors.of(context);
     return Drawer(
       width: MediaQuery.of(context).size.width * 0.82,
       elevation: 0,
@@ -1577,9 +2057,9 @@ class _DashboardPageState extends State<DashboardPage>
         ),
       ),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(32),
             bottomLeft: Radius.circular(32),
           ),
@@ -1589,7 +2069,7 @@ class _DashboardPageState extends State<DashboardPage>
             // ── Header ─────────────────────────────────────────────────
             Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [_navy, _navyCard],
                   begin: Alignment.topLeft,
@@ -1625,7 +2105,8 @@ class _DashboardPageState extends State<DashboardPage>
                   ),
                   Padding(
                     padding: EdgeInsets.only(
-                      top: MediaQuery.of(context).padding.top + 24,
+                      top:
+                          kIsWeb ? 24 : MediaQuery.of(context).padding.top + 24,
                       left: 24,
                       right: 24,
                       bottom: 30,
@@ -1636,7 +2117,7 @@ class _DashboardPageState extends State<DashboardPage>
                         // Avatar with gold ring
                         Container(
                           padding: const EdgeInsets.all(2.5),
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: [_gold, _goldSoft],
                             ),
@@ -1644,7 +2125,7 @@ class _DashboardPageState extends State<DashboardPage>
                           ),
                           child: Container(
                             padding: const EdgeInsets.all(2),
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               color: _navyCard,
                               shape: BoxShape.circle,
                             ),
@@ -1830,7 +2311,8 @@ class _DashboardPageState extends State<DashboardPage>
                       await FirebaseAuth.instance.signOut();
                       if (mounted) {
                         Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                          MaterialPageRoute(
+                              builder: (_) => const AuthOptionsPage()),
                           (route) => false,
                         );
                       }
@@ -1853,7 +2335,6 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
-
   // ── BOTTOM NAV BAR ────────────────────────────────────────────────────────
   Widget _bottomNav() {
     const items = [
@@ -1868,7 +2349,10 @@ class _DashboardPageState extends State<DashboardPage>
       decoration: BoxDecoration(
         color: _navy,
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, -4)),
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 20,
+              offset: const Offset(0, -4)),
         ],
       ),
       child: SafeArea(
@@ -1887,7 +2371,8 @@ class _DashboardPageState extends State<DashboardPage>
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     decoration: BoxDecoration(
-                      border: Border(top: BorderSide(
+                      border: Border(
+                          top: BorderSide(
                         color: active ? _gold : Colors.transparent,
                         width: 2.5,
                       )),
@@ -1899,16 +2384,21 @@ class _DashboardPageState extends State<DashboardPage>
                           scale: active ? 1.15 : 1.0,
                           duration: const Duration(milliseconds: 200),
                           child: Icon(icon,
-                            color: active ? _gold : Colors.white.withValues(alpha: 0.45),
-                            size: 24),
+                              color: active
+                                  ? _gold
+                                  : Colors.white.withValues(alpha: 0.45),
+                              size: 24),
                         ),
                         const SizedBox(height: 3),
                         Text(label,
-                          style: TextStyle(
-                            color: active ? _gold : Colors.white.withValues(alpha: 0.45),
-                            fontSize: 10,
-                            fontWeight: active ? FontWeight.w800 : FontWeight.w500,
-                          )),
+                            style: TextStyle(
+                              color: active
+                                  ? _gold
+                                  : Colors.white.withValues(alpha: 0.45),
+                              fontSize: 10,
+                              fontWeight:
+                                  active ? FontWeight.w800 : FontWeight.w500,
+                            )),
                       ],
                     ),
                   ),
@@ -1959,8 +2449,9 @@ class _DashboardPageState extends State<DashboardPage>
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color:
-                          isDestructive ? const Color(0xFFEF4444) : _textDark,
+                      color: isDestructive
+                          ? const Color(0xFFEF4444)
+                          : AppColors.of(context).textHi,
                     ),
                   ),
                 ),
@@ -1989,5 +2480,28 @@ class _DashboardPageState extends State<DashboardPage>
         ),
       ),
     );
+  }
+}
+
+/// Wraps a page widget that normally uses WindowsLayout (full Scaffold)
+/// so it can live inside the dashboard body without nested Scaffold issues.
+/// It uses a MediaQuery override to ensure proper sizing.
+class _NestedPage extends StatefulWidget {
+  final Widget child;
+  const _NestedPage({required this.child});
+
+  @override
+  State<_NestedPage> createState() => _NestedPageState();
+}
+
+class _NestedPageState extends State<_NestedPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

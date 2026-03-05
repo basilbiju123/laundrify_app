@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 import 'role_based_auth_service.dart';
+import 'employee_service.dart';
 import 'notification_service.dart';
 
 class AuthService {
@@ -14,6 +15,7 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final RoleBasedAuthService _roleService = RoleBasedAuthService();
+  final EmployeeService _employeeService = EmployeeService();
 
   // Lazy-init: never instantiated on Web (would crash with missing clientId)
   GoogleSignIn? _googleSignInInstance;
@@ -57,6 +59,9 @@ class AuthService {
   // ── MOBILE: standard GoogleSignIn package ─────────────────────
   Future<Map<String, dynamic>> signInWithGoogle() async {
     try {
+      // Always sign out first so the account picker is shown on every sign-in
+      // (prevents silent re-auth after the user explicitly logs out)
+      await _googleSignIn.signOut();
       final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return {'success': false, 'error': 'Sign in cancelled'};
       final googleAuth = await googleUser.authentication;
@@ -103,6 +108,8 @@ class AuthService {
     final existingDoc = await _db.collection('users').doc(user.uid).get();
     final isNewUser = !existingDoc.exists;
     await _createOrUpdateGoogleUser(user);
+    // Link /employees record (if any) so role redirect works on first login
+    await _employeeService.linkEmployeeOnLogin(user);
     final accessibleRoles = await _roleService.getUserAccessibleRoles();
     final route = await _roleService.getDashboardRoute();
     return {

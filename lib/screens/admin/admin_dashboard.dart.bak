@@ -14,7 +14,6 @@ import 'admin_notifications_page.dart';
 import 'admin_settings_page.dart';
 import 'admin_analytics_page.dart';
 import '../auth_options_page.dart';
-import '../../services/panel_theme_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════
 // ADMIN DASHBOARD — Full Firebase backend  |  Firebase Console-level data
@@ -42,6 +41,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       todayRevenue = 0,
       avgOrderValue = 0;
   bool _loading = true;
+  int _pendingStreams = 2; // both users + orders must fire before hiding spinner
 
   List<Map<String, dynamic>> weeklyOrders = [];
   List<Map<String, dynamic>> monthlyRevenue = [];
@@ -49,7 +49,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   Map<String, int> serviceTypes = {};
 
   late AnimationController _pulseCtrl;
-  Timer? _refreshTimer;
+  StreamSubscription? _usersSub;
+  StreamSubscription? _ordersSub;
   late AnimationController _entryCtrl;
   // ignore: unused_field
   late Animation<double> _entryFade;
@@ -80,39 +81,16 @@ class _AdminDashboardState extends State<AdminDashboard>
         .animate(
             CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOutCubic));
     _entryCtrl.forward();
-    _loadAll();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadAll(isRefresh: true));
+    _subscribeStreams();
   }
 
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    _entryCtrl.dispose();
-    _refreshTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _loadAll({bool isRefresh = false}) async {
-    if (!isRefresh && mounted) setState(() => _loading = true);
-    await Future.wait([_loadStats(), _loadCharts()]);
-    if (mounted) setState(() => _loading = false);
-  }
-
-  Future<void> _loadStats() async {
-    try {
+  void _subscribeStreams() {
+    _pendingStreams = 2;
+    // Stream users — live updates, no flash
+    _usersSub = _db.collection('users').snapshots().listen((usersSnap) {
+      if (!mounted) return;
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
-      final monthStart = DateTime(now.year, now.month, 1);
-
-      // Simple single-field queries to avoid composite index requirements
-      final results = await Future.wait([
-        _db.collection('users').get(),
-        _db.collection('orders').get(),
-      ]);
-
-      final usersSnap = results[0] as QuerySnapshot;
-      final ordersSnap = results[1] as QuerySnapshot;
-
       int uCount = 0, empCount = 0, newUsersToday_ = 0;
       for (var d in usersSnap.docs) {
         final m = d.data() as Map;
@@ -124,148 +102,119 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
         if (['delivery', 'manager', 'staff', 'employee'].contains(role)) empCount++;
       }
+      setState(() {
+        totalUsers = uCount;
+        totalEmployees = empCount;
+        newUsersToday = newUsersToday_;
+        if (_pendingStreams > 0) { _pendingStreams--; }
+        if (_pendingStreams == 0) _loading = false;
+      });
+    }, onError: (e) {
+      debugPrint('Users stream error: $e');
+      if (mounted) setState(() { if (_pendingStreams > 0) _pendingStreams--; if (_pendingStreams == 0) _loading = false; });
+    });
+
+    // Stream orders — live updates, no flash
+    _ordersSub = _db.collection('orders').snapshots().listen((ordersSnap) {
+      if (!mounted) return;
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final monthStart = DateTime(now.year, now.month, 1);
 
       int oTotal = 0, oActive = 0, oPending = 0, oComplete = 0, oCancel = 0, oToday = 0;
       double oRev = 0, oMonthRev = 0, oDayRev = 0;
+      final Map<String, int> statusMap = {};
+      final Map<String, int> serviceMap = {};
+      final Map<String, int> weekMap = {};
+      final Map<String, double> monthRevMap = {};
+
+      const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
       for (var d in ordersSnap.docs) {
         final m = d.data() as Map;
         final s = (m['status'] ?? 'pending') as String;
         final ts = (m['createdAt'] as Timestamp?)?.toDate();
         final amt = ((m['total'] ?? m['totalAmount'] ?? 0) as num).toDouble();
         oTotal++;
+        statusMap[s] = (statusMap[s] ?? 0) + 1;
+        final svcType = (m['serviceType'] ?? m['service'] ?? 'Other') as String;
+        serviceMap[svcType] = (serviceMap[svcType] ?? 0) + 1;
         if (['pending','assigned','pickup','processing','out_for_delivery','accepted','reached','picked','ready'].contains(s)) oActive++;
         if (s == 'pending') oPending++;
         if (['completed','delivered'].contains(s)) { oComplete++; oRev += amt; }
         if (s == 'cancelled') oCancel++;
-        if (ts != null && ts.isAfter(todayStart)) {
-          oToday++;
-          if (['completed','delivered'].contains(s)) oDayRev += amt;
-        }
-        if (ts != null && ts.isAfter(monthStart) && ['completed','delivered'].contains(s)) oMonthRev += amt;
-      }
-
-      if (mounted) {
-        setState(() {
-          totalUsers = uCount;
-          totalOrders = oTotal;
-          activeOrders = oActive;
-          totalEmployees = empCount;
-          pendingOrders = oPending;
-          completedOrders = oComplete;
-          cancelledOrders = oCancel;
-          newUsersToday = newUsersToday_;
-          newOrdersToday = oToday;
-          totalRevenue = oRev;
-          monthRevenue = oMonthRev;
-          todayRevenue = oDayRev;
-          avgOrderValue = oComplete > 0 ? oRev / oComplete : 0;
-        });
-      }
-    } catch (e) {
-      debugPrint('Stats error: $e');
-      // Cancel refresh timer if permission denied — rules need to be applied
-      if (e.toString().contains('permission-denied') || e.toString().contains('PERMISSION_DENIED')) {
-        _refreshTimer?.cancel();
-        debugPrint('Admin dashboard: Firestore rules not applied. Apply firestore.rules in Firebase Console.');
-      }
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-    Future<void> _loadCharts() async {
-    try {
-      final now = DateTime.now();
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-      // Fetch all orders at once — no compound indexes needed
-      final allOrders = await _db.collection('orders').get();
-
-      // Weekly orders (last 7 days)
-      final List<Map<String, dynamic>> wk = List.generate(7, (i) {
-        final day = now.subtract(Duration(days: 6 - i));
-        return {'day': days[day.weekday - 1], 'count': 0.0, 'revenue': 0.0, 'date': DateTime(day.year, day.month, day.day)};
-      });
-
-      // Status + service maps + monthly
-      final Map<String, int> sMap = {}, svMap = {};
-      final Map<int, double> monRevMap = {}; // month index → revenue
-      final Map<int, int> monOrdMap = {};
-
-      for (var d in allOrders.docs) {
-        final m = d.data();
-        final s = (m['status'] ?? 'pending') as String;
-        final svc = (m['serviceType'] ?? 'laundry') as String;
-        final ts = (m['createdAt'] as Timestamp?)?.toDate();
-        final amt = ((m['total'] ?? m['totalAmount'] ?? 0) as num).toDouble();
-
-        sMap[s] = (sMap[s] ?? 0) + 1;
-        svMap[svc] = (svMap[svc] ?? 0) + 1;
-
         if (ts != null) {
-          // Weekly
-          for (var w in wk) {
-            final wDate = w['date'] as DateTime;
-            if (ts.year == wDate.year && ts.month == wDate.month && ts.day == wDate.day) {
-              w['count'] = (w['count'] as double) + 1;
-              if (['completed','delivered'].contains(s)) {
-                w['revenue'] = (w['revenue'] as double) + amt;
-              }
-            }
+          if (ts.isAfter(todayStart)) {
+            oToday++;
+            if (['completed','delivered'].contains(s)) oDayRev += amt;
           }
-          // Monthly (last 6 months)
-          for (int i = 5; i >= 0; i--) {
-            final mDate = DateTime(now.year, now.month - i, 1);
-            if (ts.year == mDate.year && ts.month == mDate.month) {
-              final key = 5 - i;
-              monOrdMap[key] = (monOrdMap[key] ?? 0) + 1;
-              if (['completed','delivered'].contains(s)) {
-                monRevMap[key] = (monRevMap[key] ?? 0) + amt;
-              }
-            }
+          if (ts.isAfter(monthStart) && ['completed','delivered'].contains(s)) oMonthRev += amt;
+          // Weekly chart
+          final wday = weekdays[ts.weekday - 1];
+          weekMap[wday] = (weekMap[wday] ?? 0) + 1;
+          // Monthly revenue chart
+          final mon = months[ts.month - 1];
+          if (['completed','delivered'].contains(s)) {
+            monthRevMap[mon] = (monthRevMap[mon] ?? 0) + amt;
           }
         }
       }
 
-      // Build monthly list
-      final List<Map<String, dynamic>> monList = [];
-      for (int i = 5; i >= 0; i--) {
-        final mDate = DateTime(now.year, now.month - i, 1);
-        final key = 5 - i;
-        monList.add({
-          'month': months[mDate.month - 1],
-          'revenue': monRevMap[key] ?? 0.0,
-          'orders': monOrdMap[key] ?? 0,
-        });
-      }
+      final weeklyData = weekdays.map((d) => {'day': d, 'count': (weekMap[d] ?? 0).toDouble()}).toList();
+      final monthlyData = months.map((m) => {'month': m, 'revenue': monthRevMap[m] ?? 0.0}).toList();
 
-      if (mounted) {
-        setState(() {
-          weeklyOrders = wk;
-          orderStatus = sMap;
-          serviceTypes = svMap;
-          monthlyRevenue = monList;
-        });
-      }
-    } catch (e) {
-      debugPrint('Charts error: $e');
-      if (e.toString().contains('permission-denied') || e.toString().contains('PERMISSION_DENIED')) {
-        _refreshTimer?.cancel();
-      }
-    }
+      setState(() {
+        totalOrders = oTotal;
+        activeOrders = oActive;
+        pendingOrders = oPending;
+        completedOrders = oComplete;
+        cancelledOrders = oCancel;
+        newOrdersToday = oToday;
+        totalRevenue = oRev;
+        monthRevenue = oMonthRev;
+        todayRevenue = oDayRev;
+        avgOrderValue = oComplete > 0 ? oRev / oComplete : 0;
+        orderStatus = Map<String, int>.from(statusMap);
+        serviceTypes = Map<String, int>.from(serviceMap);
+        weeklyOrders = weeklyData;
+        monthlyRevenue = monthlyData;
+        if (_pendingStreams > 0) { _pendingStreams--; }
+        if (_pendingStreams == 0) _loading = false;
+      });
+    }, onError: (e) {
+      debugPrint('Orders stream error: $e');
+      if (mounted) setState(() { if (_pendingStreams > 0) _pendingStreams--; if (_pendingStreams == 0) _loading = false; });
+    });
   }
 
-    @override
+  Future<void> _loadAll({bool isRefresh = false}) async {
+    // No-op: data is kept live via streams. Called from refresh button.
+    // Just re-subscribe to force a fresh pull.
+    _usersSub?.cancel();
+    _ordersSub?.cancel();
+    _subscribeStreams();
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    _entryCtrl.dispose();
+    _usersSub?.cancel();
+    _ordersSub?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final at = DynAdmin.of(context);
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final isWide = MediaQuery.of(context).size.width > 760;
-    final scaffold = Scaffold(
-      backgroundColor: at.bg,
+    return Scaffold(
+      backgroundColor: AdminTheme.bg,
       drawer: isWide
           ? null
           : Drawer(
-              backgroundColor: at.surface,
+              backgroundColor: AdminTheme.surface,
               child: _sidebar(),
             ),
       body: Row(children: [
@@ -286,7 +235,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         ])),
       ]),
     );
-    return PanelThemeScope(panelKey: 'admin', child: scaffold);
   }
 
   Widget _page() {
@@ -314,13 +262,12 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   // ── Sidebar ───────────────────────────────────────────────────
   Widget _sidebar() {
-    final at = DynAdmin.of(context);
     final user = _auth.currentUser;
     return Container(
       width: 215,
       decoration: BoxDecoration(
-        color: at.surface,
-        border: Border(right: BorderSide(color: at.cardBorder)),
+        color: AdminTheme.surface,
+        border: Border(right: BorderSide(color: AdminTheme.cardBorder)),
       ),
       child: SafeArea(
           child: Column(children: [
@@ -340,17 +287,17 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             const SizedBox(width: 10),
-            Column(
+            const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Laundrify',
                       style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w900,
-                          color: at.textPrimary)),
+                          color: AdminTheme.textPrimary)),
                   Text('Admin Portal',
                       style: TextStyle(
-                          fontSize: 10, color: at.textSecondary)),
+                          fontSize: 10, color: AdminTheme.textSecondary)),
                 ]),
           ]),
         ),
@@ -386,7 +333,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   child: Row(children: [
                     Icon(item.icon,
                         color:
-                            active ? AdminTheme.gold : at.textSecondary,
+                            active ? AdminTheme.gold : AdminTheme.textSecondary,
                         size: 17),
                     const SizedBox(width: 10),
                     Text(item.label,
@@ -395,14 +342,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                           fontWeight: FontWeight.w700,
                           color: active
                               ? AdminTheme.gold
-                              : at.textSecondary,
+                              : AdminTheme.textSecondary,
                         )),
                     if (active) ...[
                       const Spacer(),
                       Container(
                           width: 4,
                           height: 4,
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                               color: AdminTheme.gold, shape: BoxShape.circle))
                     ],
                   ]),
@@ -415,9 +362,9 @@ class _AdminDashboardState extends State<AdminDashboard>
           margin: const EdgeInsets.all(10),
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
-              color: at.card,
+              color: AdminTheme.card,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: at.cardBorder)),
+              border: Border.all(color: AdminTheme.cardBorder)),
           child: Row(children: [
             CircleAvatar(
               radius: 17,
@@ -438,15 +385,15 @@ class _AdminDashboardState extends State<AdminDashboard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                   Text(user?.displayName ?? 'Admin',
-                      style: TextStyle(
+                      style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: at.textPrimary),
+                          color: AdminTheme.textPrimary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
-                  Text('Administrator',
+                  const Text('Administrator',
                       style: TextStyle(
-                          fontSize: 9, color: at.textSecondary)),
+                          fontSize: 9, color: AdminTheme.textSecondary)),
                 ])),
             GestureDetector(
               onTap: () async {
@@ -478,7 +425,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     final h = DateTime.now().hour;
     final greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -523,8 +470,30 @@ class _AdminDashboardState extends State<AdminDashboard>
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(greeting, style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
-                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
+                Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
               ]),
+            ),
+            // Live indicator
+            AnimatedBuilder(
+              animation: _pulseCtrl,
+              builder: (_, __) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AdminTheme.emerald.withValues(alpha: 0.12 + _pulseCtrl.value * 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AdminTheme.emerald.withValues(alpha: 0.4)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 6, height: 6,
+                    decoration: BoxDecoration(
+                      color: AdminTheme.emerald.withValues(alpha: 0.5 + _pulseCtrl.value * 0.5),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: AdminTheme.emerald.withValues(alpha: 0.5), blurRadius: 4)],
+                    )),
+                  const SizedBox(width: 5),
+                  const Text('LIVE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AdminTheme.emerald, letterSpacing: 1)),
+                ]),
+              ),
             ),
             const SizedBox(width: 8),
             // Refresh
@@ -587,7 +556,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   // DASHBOARD HOME
   // ═══════════════════════════════════════════════════════════════════
   Widget _home() {
-    final at = DynAdmin.of(context);
     if (_loading) {
       return const Center(
           child: CircularProgressIndicator(
@@ -599,7 +567,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _welcome(),
         const SizedBox(height: 18),
-        Text('Key Metrics', style: at.heading(15)),
+        Text('Key Metrics', style: AdminTheme.heading(15)),
         const SizedBox(height: 10),
         _kpiGrid(),
         const SizedBox(height: 18),
@@ -731,88 +699,73 @@ class _AdminDashboardState extends State<AdminDashboard>
       _KpiD('Avg Order', '₹${avgOrderValue.toStringAsFixed(0)}',
           Icons.currency_rupee_rounded, AdminTheme.cyan, 'Per order'),
     ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Responsive: 2 cols on narrow, 4 on wide
-        final cols = constraints.maxWidth < 400 ? 2 : 4;
-        // Calculate safe aspect ratio based on available card width
-        final cardW = (constraints.maxWidth - (cols - 1) * 10) / cols;
-        // Each card needs ~90px height for icon row + value + label + padding
-        final ratio = (cardW / 90).clamp(0.9, 1.6);
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: cols,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              childAspectRatio: ratio),
-          itemCount: items.length,
-          itemBuilder: (_, i) {
-            final at = DynAdmin.of(context);
-            final it = items[i];
-            return Container(
-              padding: const EdgeInsets.all(10),
-              decoration: at.cardDecoration(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(children: [
-                    Container(
-                        padding: const EdgeInsets.all(5),
-                        decoration: BoxDecoration(
-                            color: it.color.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(7)),
-                        child: Icon(it.icon, color: it.color, size: 13)),
-                    const Spacer(),
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: AdminTheme.emerald.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4)),
-                        child: Text(it.sub,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                            style: const TextStyle(
-                                fontSize: 6.5,
-                                fontWeight: FontWeight.w800,
-                                color: AdminTheme.emerald)),
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: 4),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(it.value,
-                        style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w900,
-                            color: it.color,
-                            letterSpacing: -0.5)),
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 4,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 1.45),
+      itemCount: items.length,
+      itemBuilder: (_, i) {
+        final it = items[i];
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: AdminTheme.cardDecoration(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(children: [
+                Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                        color: it.color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(it.icon, color: it.color, size: 14)),
+                const Spacer(),
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: AdminTheme.emerald.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(5)),
+                    child: Text(it.sub,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w800,
+                            color: AdminTheme.emerald)),
                   ),
-                  const SizedBox(height: 2),
-                  Text(it.label,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                      style: at.label(9)),
-                ],
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(it.value,
+                      style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          color: it.color,
+                          letterSpacing: -0.5)),
+                ),
               ),
-            );
-          },
+              const SizedBox(height: 2),
+              Text(it.label, overflow: TextOverflow.ellipsis, style: AdminTheme.label(10)),
+            ],
+          ),
         );
       },
     );
   }
 
   Widget _todayRow() {
-    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(goldGlow: true),
+      decoration: AdminTheme.cardDecoration(goldGlow: true),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
@@ -823,9 +776,9 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: const Icon(Icons.today_rounded,
                   color: AdminTheme.gold, size: 16)),
           const SizedBox(width: 9),
-          Text("Today's Overview", style: at.heading(14)),
+          Text("Today's Overview", style: AdminTheme.heading(14)),
           const Spacer(),
-          Text(_fmtDate(DateTime.now()), style: at.label(11)),
+          Text(_fmtDate(DateTime.now()), style: AdminTheme.label(11)),
         ]),
         const SizedBox(height: 14),
         Row(children: [
@@ -841,9 +794,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  Widget _todayTile(String l, String v, Color c) {
-    final at = DynAdmin.of(context);
-    return Expanded(
+  Widget _todayTile(String l, String v, Color c) => Expanded(
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
@@ -857,15 +808,13 @@ class _AdminDashboardState extends State<AdminDashboard>
             const SizedBox(height: 3),
             Text(l,
                 style:
-                    at.label(9).copyWith(color: at.textMuted),
+                    AdminTheme.label(9).copyWith(color: AdminTheme.textMuted),
                 textAlign: TextAlign.center),
           ]),
         ),
       );
-  }
 
   Widget _weeklyChart() {
-    final at = DynAdmin.of(context);
     final max = weeklyOrders.isEmpty
         ? 1.0
         : weeklyOrders
@@ -883,20 +832,20 @@ class _AdminDashboardState extends State<AdminDashboard>
     ][DateTime.now().weekday - 1];
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(glow: true),
+      decoration: AdminTheme.cardDecoration(glow: true),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text('Orders This Week', style: at.heading(13)),
+          Text('Orders This Week', style: AdminTheme.heading(13)),
           const Spacer(),
           Text(
               '${weeklyOrders.fold(0.0, (a, e) => a + (e['count'] as double)).toInt()} total',
-              style: at.label(11)),
+              style: AdminTheme.label(11)),
         ]),
         const SizedBox(height: 14),
         SizedBox(
           height: 120,
           child: weeklyOrders.isEmpty
-              ? Center(child: Text('No data', style: at.label(13)))
+              ? Center(child: Text('No data', style: AdminTheme.label(13)))
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -904,7 +853,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     final cnt = d['count'] as double;
                     final h = (cnt / max) * 90;
                     final today = d['day'] == todayLabel;
-                    return Flexible(child: Column(
+                    return Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           Text('${cnt.toInt()}',
@@ -913,7 +862,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                                   fontWeight: FontWeight.w800,
                                   color: today
                                       ? AdminTheme.gold
-                                      : at.textMuted)),
+                                      : AdminTheme.textMuted)),
                           const SizedBox(height: 3),
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 700),
@@ -950,8 +899,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                                   fontWeight: FontWeight.w700,
                                   color: today
                                       ? AdminTheme.gold
-                                      : at.textSecondary)),
-                        ])); // close Flexible
+                                      : AdminTheme.textSecondary)),
+                        ]);
                   }).toList()),
         ),
       ]),
@@ -959,7 +908,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _statusChart() {
-    final at = DynAdmin.of(context);
     final total = orderStatus.values.fold(0, (a, b) => a + b);
     final colors = {
       'pending': AdminTheme.amber,
@@ -973,19 +921,18 @@ class _AdminDashboardState extends State<AdminDashboard>
     };
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(),
+      decoration: AdminTheme.cardDecoration(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Order Status', style: at.heading(13)),
+        Text('Order Status', style: AdminTheme.heading(13)),
         const SizedBox(height: 3),
-        Text('$total total orders', style: at.label(10)),
+        Text('$total total orders', style: AdminTheme.label(10)),
         const SizedBox(height: 12),
         if (total == 0)
-          Center(child: Text('No orders yet', style: at.label(13)))
+          Center(child: Text('No orders yet', style: AdminTheme.label(13)))
         else
           ...orderStatus.entries.take(7).map((e) {
-            final at = DynAdmin.of(context);
             final pct = e.value / total;
-            final c = colors[e.key] ?? at.textSecondary;
+            final c = colors[e.key] ?? AdminTheme.textSecondary;
             return Padding(
                 padding: const EdgeInsets.only(bottom: 9),
                 child: Column(
@@ -1002,10 +949,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                         Expanded(
                             child: Text(
                                 e.key.replaceAll('_', ' ').toUpperCase(),
-                                style: TextStyle(
+                                style: const TextStyle(
                                     fontSize: 8.5,
                                     fontWeight: FontWeight.w700,
-                                    color: at.textSecondary))),
+                                    color: AdminTheme.textSecondary))),
                         Text('${e.value}',
                             style: TextStyle(
                                 fontSize: 11,
@@ -1013,7 +960,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 color: c)),
                         const SizedBox(width: 5),
                         Text('${(pct * 100).toInt()}%',
-                            style: at.label(8)),
+                            style: AdminTheme.label(8)),
                       ]),
                       const SizedBox(height: 3),
                       ClipRRect(
@@ -1030,7 +977,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _revenueChart() {
-    final at = DynAdmin.of(context);
     final max = monthlyRevenue.isEmpty
         ? 1.0
         : monthlyRevenue
@@ -1041,10 +987,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         monthlyRevenue.fold(0.0, (s, e) => s + (e['revenue'] as double));
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(glow: true),
+      decoration: AdminTheme.cardDecoration(glow: true),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text('6-Month Revenue', style: at.heading(13)),
+          Text('6-Month Revenue', style: AdminTheme.heading(13)),
           const Spacer(),
           Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1062,17 +1008,16 @@ class _AdminDashboardState extends State<AdminDashboard>
           height: 130,
           child: monthlyRevenue.isEmpty
               ? Center(
-                  child: Text('No revenue data', style: at.label(13)))
+                  child: Text('No revenue data', style: AdminTheme.label(13)))
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: monthlyRevenue.asMap().entries.map((entry) {
-                    final at = DynAdmin.of(context);
                     final e = entry.value;
                     final rev = e['revenue'] as double;
                     final h = (rev / max) * 100;
                     final last = entry.key == monthlyRevenue.length - 1;
-                    return Flexible(child: Column(
+                    return Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           Text('₹${_fmtNum(rev)}',
@@ -1081,7 +1026,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                                   fontWeight: FontWeight.w800,
                                   color: last
                                       ? AdminTheme.emerald
-                                      : at.textMuted)),
+                                      : AdminTheme.textMuted)),
                           const SizedBox(height: 3),
                           Container(
                             width: 32,
@@ -1106,13 +1051,13 @@ class _AdminDashboardState extends State<AdminDashboard>
                             ),
                           ),
                           const SizedBox(height: 5),
-                          Text(e['month'], style: at.label(9)),
+                          Text(e['month'], style: AdminTheme.label(9)),
                           Text('${e['orders']}',
-                              style: TextStyle(
+                              style: const TextStyle(
                                   fontSize: 8,
-                                  color: at.textMuted,
+                                  color: AdminTheme.textMuted,
                                   fontWeight: FontWeight.w600)),
-                        ])); // close Flexible
+                        ]);
                   }).toList()),
         ),
       ]),
@@ -1120,13 +1065,12 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _liveOrders() {
-    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(),
+      decoration: AdminTheme.cardDecoration(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text('Live Orders', style: at.heading(13)),
+          Text('Live Orders', style: AdminTheme.heading(13)),
           const Spacer(),
           AnimatedBuilder(
               animation: _pulseCtrl,
@@ -1180,20 +1124,18 @@ class _AdminDashboardState extends State<AdminDashboard>
                           color: AdminTheme.gold, strokeWidth: 2)));
             }
             if (!snap.hasData || snap.data!.docs.isEmpty) {
-              final at = DynAdmin.of(context);
               return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Center(
                       child: Column(children: [
-                    Icon(Icons.inbox_rounded,
-                        color: at.textMuted, size: 32),
+                    const Icon(Icons.inbox_rounded,
+                        color: AdminTheme.textMuted, size: 32),
                     const SizedBox(height: 6),
-                    Text('No active orders', style: at.label(12)),
+                    Text('No active orders', style: AdminTheme.label(12)),
                   ])));
             }
             return Column(
                 children: snap.data!.docs.map((doc) {
-              final at = DynAdmin.of(context);
               final d = doc.data() as Map<String, dynamic>;
               final status = d['status'] ?? 'pending';
               final c = statusColor(status);
@@ -1218,13 +1160,13 @@ class _AdminDashboardState extends State<AdminDashboard>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                         Text(d['customerName'] ?? 'Customer',
-                            style: TextStyle(
+                            style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w800,
-                                color: at.textPrimary)),
+                                color: AdminTheme.textPrimary)),
                         Text(
                             '#${doc.id.substring(0, 7).toUpperCase()}  ₹${(d['total'] ?? d['totalAmount'] ?? 0).toStringAsFixed(0)}',
-                            style: at.label(9)),
+                            style: AdminTheme.label(9)),
                       ])),
                   Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                     AdminBadge(
@@ -1234,8 +1176,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                     if (ts != null) ...[
                       const SizedBox(height: 2),
                       Text('${ts.hour}:${ts.minute.toString().padLeft(2, '0')}',
-                          style: at.label(8)
-                              .copyWith(color: at.textMuted))
+                          style: AdminTheme.label(8)
+                              .copyWith(color: AdminTheme.textMuted))
                     ],
                   ]),
                 ]),
@@ -1248,7 +1190,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _serviceCard() {
-    final at = DynAdmin.of(context);
     final sColors = {
       'laundry': AdminTheme.accent,
       'dryclean': AdminTheme.violet,
@@ -1268,18 +1209,18 @@ class _AdminDashboardState extends State<AdminDashboard>
     final total = serviceTypes.values.fold(0, (a, b) => a + b);
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(),
+      decoration: AdminTheme.cardDecoration(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Services', style: at.heading(13)),
+        Text('Services', style: AdminTheme.heading(13)),
         const SizedBox(height: 3),
         Text('$total orders across ${serviceTypes.length} types',
-            style: at.label(10)),
+            style: AdminTheme.label(10)),
         const SizedBox(height: 12),
         if (serviceTypes.isEmpty)
-          Center(child: Text('No data', style: at.label(13)))
+          Center(child: Text('No data', style: AdminTheme.label(13)))
         else
           ...serviceTypes.entries.map((e) {
-            final c = sColors[e.key] ?? at.textSecondary;
+            final c = sColors[e.key] ?? AdminTheme.textSecondary;
             final icon = sIcons[e.key] ?? Icons.category_rounded;
             final pct = total > 0 ? e.value / total : 0.0;
             return Container(
@@ -1302,10 +1243,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       Text(e.key.toUpperCase(),
-                          style: TextStyle(
+                          style: const TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w800,
-                              color: at.textPrimary)),
+                              color: AdminTheme.textPrimary)),
                       const SizedBox(height: 3),
                       ClipRRect(
                           borderRadius: BorderRadius.circular(3),
@@ -1327,13 +1268,12 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _recentUsers() {
-    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(),
+      decoration: AdminTheme.cardDecoration(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text('Recent Signups', style: at.heading(13)),
+          Text('Recent Signups', style: AdminTheme.heading(13)),
           const Spacer(),
           GestureDetector(
             onTap: () => setState(() => _selectedIndex = 2),
@@ -1346,11 +1286,11 @@ class _AdminDashboardState extends State<AdminDashboard>
         ]),
         const SizedBox(height: 10),
         StreamBuilder<QuerySnapshot>(
-          // No composite index needed: simple role filter, sort client-side
           stream: _db
               .collection('users')
               .where('role', isEqualTo: 'user')
-              .limit(20)
+              .orderBy('createdAt', descending: true)
+              .limit(5)
               .snapshots(),
           builder: (_, snap) {
             if (!snap.hasData) {
@@ -1358,23 +1298,12 @@ class _AdminDashboardState extends State<AdminDashboard>
                   child: CircularProgressIndicator(
                       color: AdminTheme.gold, strokeWidth: 2));
             }
-            final docs = [...snap.data!.docs]..sort((a, b) {
-              final ta = ((a.data() as Map)['createdAt'] as Timestamp?);
-              final tb = ((b.data() as Map)['createdAt'] as Timestamp?);
-              if (ta == null && tb == null) return 0;
-              if (ta == null) return 1;
-              if (tb == null) return -1;
-              return tb.compareTo(ta);
-            });
-            final topDocs = docs.take(5).toList();
-            if (topDocs.isEmpty) {
-              final at = DynAdmin.of(context);
+            if (snap.data!.docs.isEmpty) {
               return Center(
-                  child: Text('No users yet', style: at.label(13)));
+                  child: Text('No users yet', style: AdminTheme.label(13)));
             }
             return Column(
-                children: topDocs.map((doc) {
-              final at = DynAdmin.of(context);
+                children: snap.data!.docs.map((doc) {
               final d = doc.data() as Map<String, dynamic>;
               final name = d['name'] ?? 'User';
               final ts = (d['createdAt'] as Timestamp?)?.toDate();
@@ -1396,15 +1325,15 @@ class _AdminDashboardState extends State<AdminDashboard>
                       : null,
                 ),
                 title: Text(name,
-                    style: TextStyle(
+                    style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: at.textPrimary)),
-                subtitle: Text(d['email'] ?? '', style: at.label(10)),
+                        color: AdminTheme.textPrimary)),
+                subtitle: Text(d['email'] ?? '', style: AdminTheme.label(10)),
                 trailing: ts != null
                     ? Text('${ts.day}/${ts.month}',
-                        style: at.label(10)
-                            .copyWith(color: at.textMuted))
+                        style: AdminTheme.label(10)
+                            .copyWith(color: AdminTheme.textMuted))
                     : null,
               );
             }).toList());
@@ -1415,10 +1344,9 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _appUsage() {
-    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: at.cardDecoration(goldGlow: true),
+      decoration: AdminTheme.cardDecoration(goldGlow: true),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
@@ -1429,7 +1357,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: const Icon(Icons.insights_rounded,
                   color: AdminTheme.gold, size: 15)),
           const SizedBox(width: 8),
-          Text('App Usage Summary', style: at.heading(14)),
+          Text('App Usage Summary', style: AdminTheme.heading(14)),
         ]),
         const SizedBox(height: 14),
         StreamBuilder<QuerySnapshot>(
@@ -1470,9 +1398,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  Widget _usageTile(String l, String v, Color c, IconData icon) {
-    final at = DynAdmin.of(context);
-    return Expanded(
+  Widget _usageTile(String l, String v, Color c, IconData icon) => Expanded(
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
@@ -1488,12 +1414,11 @@ class _AdminDashboardState extends State<AdminDashboard>
             const SizedBox(height: 2),
             Text(l,
                 style:
-                    at.label(8).copyWith(color: at.textMuted),
+                    AdminTheme.label(8).copyWith(color: AdminTheme.textMuted),
                 textAlign: TextAlign.center),
           ]),
         ),
       );
-  }
 
   String _fmtNum(double v) {
     if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';

@@ -1,9 +1,10 @@
+import 'auth_options_page.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'auth_options_page.dart';
-import '../services/theme_service.dart';
+import '../services/panel_theme_service.dart';
+import '../theme/app_theme.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -15,10 +16,14 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   static const _navy = Color(0xFF080F1E);
   static const _gold = Color(0xFFF5C518);
-  static const _bg = Color(0xFFF0F4FF);
-  static const _card = Colors.white;
 
-  bool get _darkMode => ThemeService().isDarkMode;
+  bool get _darkMode {
+    try {
+      return PanelThemeScope.of(context).isDark;
+    } catch (_) {
+      return Theme.of(context).brightness == Brightness.dark;
+    }
+  }
   bool _orderNotifications = true;
   bool _promotionalNotifications = true;
   bool _smsAlerts = false;
@@ -56,10 +61,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: _navy,
+        backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
         title: const Text(
           'Settings',
@@ -82,7 +88,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.dark_mode_rounded,
                 _darkMode,
                 (v) async {
-                  await ThemeService().setDarkMode(v);
+                  try {
+                    await PanelThemeScope.of(context).setDark(v);
+                  } catch (_) {}
                   if (mounted) setState(() {});
                 },
               ),
@@ -180,30 +188,37 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _sectionTitle(String title) => Text(
-        title,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
-          color: Color(0xFF94A3B8),
-          letterSpacing: 0.5,
-        ),
-      );
+  Widget _sectionTitle(String title) {
+    final t = AppColors.of(context);
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w800,
+        color: t.textDim,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
 
-  Widget _settingCard(List<Widget> children) => Container(
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            )
-          ],
-        ),
-        child: Column(children: children),
-      );
+  Widget _settingCard(List<Widget> children) {
+    final t = AppColors.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.cardBdr),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: t.isDark ? 0.2 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          )
+        ],
+      ),
+      child: Column(children: children),
+    );
+  }
 
   Widget _toggleTile(
     String title,
@@ -230,13 +245,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: _navy)),
+                          color: AppColors.of(context).textHi)),
                   Text(subtitle,
-                      style: const TextStyle(
-                          fontSize: 11, color: Color(0xFF94A3B8))),
+                      style: TextStyle(
+                          fontSize: 11, color: AppColors.of(context).textDim)),
                 ],
               ),
             ),
@@ -267,12 +282,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: color ?? _navy,
+                    color: color ?? AppColors.of(context).textHi,
                   ),
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  color: color ?? const Color(0xFF94A3B8), size: 20),
+                  color: color ?? AppColors.of(context).textDim, size: 20),
             ],
           ),
         ),
@@ -337,7 +352,8 @@ class _SettingsPageState extends State<SettingsPage> {
           // Delete all user subcollections data
           final batch = FirebaseFirestore.instance.batch();
           // Delete user document
-          batch.delete(FirebaseFirestore.instance.collection('users').doc(user.uid));
+          batch.delete(
+              FirebaseFirestore.instance.collection('users').doc(user.uid));
           await batch.commit();
           // Delete Firebase Auth account
           await user.delete();
@@ -352,7 +368,8 @@ class _SettingsPageState extends State<SettingsPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Please sign out and sign back in before deleting your account.'),
+              content: Text(
+                  'Please sign out and sign back in before deleting your account.'),
               backgroundColor: Colors.red.shade700,
               behavior: SnackBarBehavior.floating,
             ),

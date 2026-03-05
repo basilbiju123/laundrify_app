@@ -95,7 +95,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               }
 
               return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
                 physics: const BouncingScrollPhysics(),
                 itemCount: docs.length,
                 itemBuilder: (_, i) => _UserCard(doc: docs[i]),
@@ -135,7 +135,7 @@ class _UserCard extends StatelessWidget {
                   backgroundColor: AdminTheme.gold.withValues(alpha: 0.2),
                   backgroundImage: (d['photoURL'] != null) ? NetworkImage(d['photoURL']) : null,
                   child: d['photoURL'] == null ? Text(
-                    (d['name'] as String? ?? 'U')[0].toUpperCase(),
+                    (d['name'] as String? ?? '').isNotEmpty ? (d['name'] as String)[0].toUpperCase() : 'U',
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AdminTheme.gold),
                   ) : null,
                 ),
@@ -197,7 +197,7 @@ class _UserCard extends StatelessWidget {
       builder: (_) => StatefulBuilder(
         builder: (ctx2, setLocal) => Container(
           height: MediaQuery.of(ctx).size.height * 0.75,
-          decoration: const BoxDecoration(color: AdminTheme.surface, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+          decoration: BoxDecoration(color: AdminTheme.surface, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
           child: Column(
             children: [
               Container(width: 40, height: 4, margin: const EdgeInsets.only(top: 12), decoration: BoxDecoration(color: AdminTheme.textMuted, borderRadius: BorderRadius.circular(2))),
@@ -212,7 +212,7 @@ class _UserCard extends StatelessWidget {
                           radius: 32,
                           backgroundColor: AdminTheme.gold.withValues(alpha: 0.2),
                           backgroundImage: (d['photoURL'] != null) ? NetworkImage(d['photoURL']) : null,
-                          child: d['photoURL'] == null ? Text((d['name'] as String? ?? 'U')[0].toUpperCase(), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AdminTheme.gold)) : null,
+                          child: d['photoURL'] == null ? Text((d['name'] as String? ?? '').isNotEmpty ? (d['name'] as String)[0].toUpperCase() : 'U', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AdminTheme.gold)) : null,
                         ),
                         const SizedBox(width: 16),
                         Expanded(child: Column(

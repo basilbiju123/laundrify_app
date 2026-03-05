@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'app_theme.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'auth_options_page.dart';
+import '../services/notification_service.dart';
+import '../services/panel_theme_service.dart';
 
 // ═══════════════════════════════════════════════════════════
 // DELIVERY DESIGN TOKENS — Gold + Dark Navy (matches app theme)
@@ -230,8 +233,9 @@ class _DeliveryDashboardState extends State<DeliveryDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: DD.bg,
+    final lt = DynTheme.of(context);
+    final scaffold = Scaffold(
+      backgroundColor: lt.bg,
       body: IndexedStack(
         index: _idx,
         children: const [
@@ -246,6 +250,7 @@ class _DeliveryDashboardState extends State<DeliveryDashboard> {
         onTap: (i) => setState(() => _idx = i),
       ),
     );
+    return PanelThemeScope(panelKey: 'delivery', child: scaffold);
   }
 }
 
@@ -393,6 +398,7 @@ class _HomeTabState extends State<_HomeTab> {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final uid = _auth.currentUser?.uid;
     final name = _driverName.isNotEmpty
         ? _driverName
@@ -405,7 +411,7 @@ class _HomeTabState extends State<_HomeTab> {
             : 'Good evening';
 
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       body: RefreshIndicator(
         color: DD.primary,
         onRefresh: _initDriver,
@@ -414,7 +420,7 @@ class _HomeTabState extends State<_HomeTab> {
             // ─── HEADER ───────────────────────────────────
             SliverToBoxAdapter(
                 child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(colors: [
                   Color(0xFF080F1E),
                   Color(0xFF0D1F3C),
@@ -555,10 +561,10 @@ class _HomeTabState extends State<_HomeTab> {
                             child: Row(children: [
                               _miniStat('Assigned', assigned.toString(),
                                   Icons.assignment_rounded, DD.warning),
-                              Container(width: 1, height: 44, color: DD.border),
+                              Container(width: 1, height: 44, color: lt.cardBdr),
                               _miniStat('Completed', completed.toString(),
                                   Icons.check_circle_rounded, DD.success),
-                              Container(width: 1, height: 44, color: DD.border),
+                              Container(width: 1, height: 44, color: lt.cardBdr),
                               _miniStat('Earned', '₹${earnings.toInt()}',
                                   Icons.currency_rupee_rounded, DD.primary),
                             ]),
@@ -795,6 +801,7 @@ class _OrderCardState extends State<_OrderCard> {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final d = widget.data;
     final status = d['status'] ?? 'assigned';
     final type = d['type'] ?? 'pickup';
@@ -829,7 +836,7 @@ class _OrderCardState extends State<_OrderCard> {
                   child: Icon(_sIcon(status), color: sColor, size: 14)),
               const SizedBox(width: 8),
               Text('#${widget.orderId.substring(0, 8).toUpperCase()}',
-                  style: DD.t(13, c: DD.textD)),
+                  style: DD.t(13, c: lt.textHi)),
               const Spacer(),
               _chip(_sLabel(status), sColor),
               const SizedBox(width: 6),
@@ -844,7 +851,7 @@ class _OrderCardState extends State<_OrderCard> {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                const Icon(Icons.person_rounded, size: 15, color: DD.textG),
+                Icon(Icons.person_rounded, size: 15, color: lt.textDim),
                 const SizedBox(width: 6),
                 Text(d['customerName'] ?? 'Customer', style: DD.t(13)),
               ]),
@@ -855,7 +862,7 @@ class _OrderCardState extends State<_OrderCard> {
                         ? Icons.my_location_rounded
                         : Icons.location_on_rounded,
                     size: 15,
-                    color: DD.textG),
+                    color: lt.textDim),
                 const SizedBox(width: 6),
                 Expanded(
                     child: Text(
@@ -870,7 +877,7 @@ class _OrderCardState extends State<_OrderCard> {
               if (d['scheduledTime'] != null) ...[
                 const SizedBox(height: 5),
                 Row(children: [
-                  const Icon(Icons.schedule_rounded, size: 14, color: DD.textG),
+                  Icon(Icons.schedule_rounded, size: 14, color: lt.textDim),
                   const SizedBox(width: 6),
                   Text(d['scheduledTime'] ?? '', style: DD.cap(11)),
                 ]),
@@ -943,15 +950,16 @@ class _OrderCardState extends State<_OrderCard> {
         ),
       );
 
-  Widget _outlineBtn(IconData icon, String label, VoidCallback onTap) =>
-      GestureDetector(
+  Widget _outlineBtn(IconData icon, String label, VoidCallback onTap) {
+    final lt = DynTheme.of(context);
+    return GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-              color: DD.white,
+              color: lt.card,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: DD.border)),
+              border: Border.all(color: lt.cardBdr)),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 13, color: DD.primary),
             const SizedBox(width: 4),
@@ -963,11 +971,13 @@ class _OrderCardState extends State<_OrderCard> {
           ]),
         ),
       );
-}
+  }
 
 // ═══════════════════════════════════════════════════════════
 // ORDERS TAB
 // ═══════════════════════════════════════════════════════════
+}
+
 class _OrdersTab extends StatefulWidget {
   const _OrdersTab();
   @override
@@ -1002,11 +1012,12 @@ class _OrdersTabState extends State<_OrdersTab>
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final uid = _auth.currentUser?.uid;
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       appBar: AppBar(
-        backgroundColor: DD.white,
+        backgroundColor: lt.card,
         elevation: 0,
         title: Text('My Orders', style: DD.h(19)),
         bottom: TabBar(
@@ -1014,7 +1025,7 @@ class _OrdersTabState extends State<_OrdersTab>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           labelColor: DD.primary,
-          unselectedLabelColor: DD.textG,
+          unselectedLabelColor: lt.textDim,
           indicatorColor: DD.primary,
           indicatorWeight: 3,
           labelStyle:
@@ -1028,13 +1039,33 @@ class _OrdersTabState extends State<_OrdersTab>
         controller: _tabCtrl,
         children: List.generate(_tabs.length, (i) {
           if (uid == null) return const Center(child: Text('Not logged in'));
-          return StreamBuilder<QuerySnapshot>(
-            stream: _db
+          // Completed tab (i==3) must orderBy completedAt; others use createdAt.
+          // Assigned tab (i==1) uses isEqualTo to match the composite index.
+          final Query<Map<String, dynamic>> query;
+          if (i == 3) {
+            // Completed: driverId + status (whereIn) + completedAt DESC
+            query = _db
                 .collection('orders')
                 .where('driverId', isEqualTo: uid)
                 .where('status', whereIn: _statusGroups[i])
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
+                .orderBy('completedAt', descending: true);
+          } else if (i == 1) {
+            // Assigned: use isEqualTo so a single index covers it
+            query = _db
+                .collection('orders')
+                .where('driverId', isEqualTo: uid)
+                .where('status', isEqualTo: 'assigned')
+                .orderBy('createdAt', descending: true);
+          } else {
+            // Active (i==0) and Delivery (i==2): driverId + status (whereIn) + createdAt DESC
+            query = _db
+                .collection('orders')
+                .where('driverId', isEqualTo: uid)
+                .where('status', whereIn: _statusGroups[i])
+                .orderBy('createdAt', descending: true);
+          }
+          return StreamBuilder<QuerySnapshot>(
+            stream: query.snapshots(),
             builder: (ctx, snap) {
               if (!snap.hasData) {
                 return const Center(
@@ -1071,11 +1102,12 @@ class _EarningsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       appBar: AppBar(
-        backgroundColor: DD.white,
+        backgroundColor: lt.card,
         elevation: 0,
         title: Text('My Earnings', style: DD.h(19)),
       ),
@@ -1277,6 +1309,11 @@ class _ProfileTabState extends State<_ProfileTab> {
   }
 
   Future<void> _logout() async {
+    // Unsubscribe FCM topics and clear token before signing out so Firestore
+    // listeners don't fire PERMISSION_DENIED after the auth state changes.
+    try {
+      await NotificationService().unsubscribeAllTopics();
+    } catch (_) {}
     await _auth.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -1287,6 +1324,7 @@ class _ProfileTabState extends State<_ProfileTab> {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final user = _auth.currentUser;
     final name = _driver?['name'] ?? user?.displayName ?? 'Driver';
     final phone = _driver?['phone'] ?? user?.phoneNumber ?? 'Not set';
@@ -1295,9 +1333,9 @@ class _ProfileTabState extends State<_ProfileTab> {
     final deliveries = _driver?['totalDeliveries'] ?? 0;
 
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       appBar: AppBar(
-          backgroundColor: DD.white,
+          backgroundColor: lt.card,
           elevation: 0,
           title: Text('My Profile', style: DD.h(19))),
       body: _loading
@@ -1387,6 +1425,22 @@ class _ProfileTabState extends State<_ProfileTab> {
                     _actionRow(Icons.help_outline_rounded, 'Help & Support',
                         DD.primary, () {}),
                     _divider(),
+                    // Dark mode toggle — Delivery panel only
+                    Builder(builder: (ctx) {
+                      PanelThemeService? pt;
+                      try { pt = PanelThemeScope.of(ctx); } catch (_) {}
+                      if (pt == null) return const SizedBox.shrink();
+                      final isDark = pt.isDark;
+                      return Column(children: [
+                        _actionRow(
+                          isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                          isDark ? 'Light Mode' : 'Dark Mode',
+                          DD.gold,
+                          () => pt!.toggle(),
+                        ),
+                        _divider(),
+                      ]);
+                    }),
                     _actionRow(
                         Icons.logout_rounded, 'Logout', DD.danger, _logout),
                   ]),
@@ -1396,7 +1450,10 @@ class _ProfileTabState extends State<_ProfileTab> {
     );
   }
 
-  Widget _divider() => const Divider(height: 1, indent: 56, color: DD.border);
+  Widget _divider() {
+    final lt = DynTheme.of(context);
+    return Divider(height: 1, indent: 56, color: lt.cardBdr);
+  }
 
   Widget _infoRow(IconData icon, String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1418,8 +1475,9 @@ class _ProfileTabState extends State<_ProfileTab> {
       );
 
   Widget _actionRow(
-          IconData icon, String label, Color color, VoidCallback onTap) =>
-      GestureDetector(
+          IconData icon, String label, Color color, VoidCallback onTap) {
+    final lt = DynTheme.of(context);
+    return GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
         child: Padding(
@@ -1433,15 +1491,17 @@ class _ProfileTabState extends State<_ProfileTab> {
                 child: Icon(icon, color: color, size: 17)),
             const SizedBox(width: 14),
             Expanded(child: Text(label, style: DD.t(14, c: color))),
-            Icon(Icons.arrow_forward_ios_rounded, size: 13, color: DD.textG),
+            Icon(Icons.arrow_forward_ios_rounded, size: 13, color: lt.textDim),
           ]),
         ),
       );
-}
+  }
 
 // ═══════════════════════════════════════════════════════════
 // ORDER DETAIL PAGE — Full timeline + status update
 // ═══════════════════════════════════════════════════════════
+}
+
 class OrderDetailPage extends StatefulWidget {
   final String orderId;
   final Map<String, dynamic> initialData;
@@ -1505,6 +1565,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     return StreamBuilder<DocumentSnapshot>(
       stream: _db.collection('orders').doc(widget.orderId).snapshots(),
       builder: (ctx, snap) {
+        final lt = DynTheme.of(context);
         final d =
             (snap.data?.data() as Map<String, dynamic>?) ?? widget.initialData;
         final status = d['status'] ?? 'assigned';
@@ -1513,12 +1574,12 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         final hasNext = curIdx >= 0 && curIdx < _flowSteps.length - 1;
 
         return Scaffold(
-          backgroundColor: DD.bg,
+          backgroundColor: lt.bg,
           appBar: AppBar(
-            backgroundColor: DD.white,
+            backgroundColor: lt.card,
             elevation: 0,
             leading: IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: DD.textD),
+                icon: Icon(Icons.arrow_back_rounded, color: lt.textHi),
                 onPressed: () => Navigator.pop(context)),
             title: Text(
                 'Order #${widget.orderId.substring(0, 8).toUpperCase()}',
@@ -1562,10 +1623,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                       Text('Order Timeline', style: DD.t(14)),
                       const SizedBox(height: 14),
                       ...List.generate(_flowSteps.length, (i) {
+                        final lt = DynTheme.of(context);
                         final s = _flowSteps[i];
                         final done = curIdx >= i;
                         final active = curIdx == i;
-                        final c = done ? _sColor(s) : DD.border;
+                        final c = done ? _sColor(s) : lt.cardBdr;
                         return Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -1574,7 +1636,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                      color: done ? c : DD.white,
+                                      color: done ? c : lt.card,
                                       shape: BoxShape.circle,
                                       border: Border.all(color: c, width: 2)),
                                   child: done
@@ -1588,7 +1650,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                       height: 26,
                                       color: done
                                           ? c.withValues(alpha: 0.35)
-                                          : DD.border),
+                                          : lt.cardBdr),
                               ]),
                               const SizedBox(width: 12),
                               Padding(
@@ -1601,7 +1663,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                             : FontWeight.w500,
                                         color: active
                                             ? c
-                                            : (done ? DD.textM : DD.textG))),
+                                            : (done ? lt.textMid : lt.textDim))),
                               ),
                             ]);
                       }),
@@ -1705,21 +1767,23 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   }
 
   Widget _detailRow(IconData icon, String label, String value,
-          {Color? color}) =>
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 15, color: color ?? DD.textG),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(label, style: DD.cap(11)),
-                Text(value, style: DD.t(13, c: color ?? DD.textD)),
-              ])),
-        ],
-      );
+          {Color? color}) {
+    final lt = DynTheme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 15, color: color ?? lt.textDim),
+        const SizedBox(width: 10),
+        Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+              Text(label, style: DD.cap(11)),
+              Text(value, style: DD.t(13, c: color ?? lt.textHi)),
+            ])),
+      ],
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1729,14 +1793,15 @@ class AssignedOrdersPage extends StatelessWidget {
   const AssignedOrdersPage({super.key});
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       appBar: AppBar(
-        backgroundColor: DD.white,
+        backgroundColor: lt.card,
         elevation: 0,
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: DD.textD),
+            icon: Icon(Icons.arrow_back_rounded, color: lt.textHi),
             onPressed: () => Navigator.pop(context)),
         title: Text('Assigned Orders', style: DD.h(19)),
       ),
@@ -1786,14 +1851,15 @@ class DeliveryHistoryPage extends StatelessWidget {
   const DeliveryHistoryPage({super.key});
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     return Scaffold(
-      backgroundColor: DD.bg,
+      backgroundColor: lt.bg,
       appBar: AppBar(
-        backgroundColor: DD.white,
+        backgroundColor: lt.card,
         elevation: 0,
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: DD.textD),
+            icon: Icon(Icons.arrow_back_rounded, color: lt.textHi),
             onPressed: () => Navigator.pop(context)),
         title: Text('Delivery History', style: DD.h(19)),
       ),

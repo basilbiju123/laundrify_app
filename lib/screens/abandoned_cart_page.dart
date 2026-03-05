@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'payment_page.dart';
@@ -8,15 +9,15 @@ class AbandonedCartPage extends StatelessWidget {
 
   static const _navy = Color(0xFF080F1E);
   static const _gold = Color(0xFFF5C518);
-  static const _bg = Color(0xFFF0F4FF);
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: t.bg,
       appBar: AppBar(
         backgroundColor: _navy,
         foregroundColor: Colors.white,
@@ -38,12 +39,13 @@ class AbandonedCartPage extends StatelessWidget {
           }
           final docs = snap.data?.docs ?? [];
           if (docs.isEmpty) {
+            final t = AppColors.of(context);
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.shopping_cart_outlined,
-                      size: 64, color: Colors.grey.shade300),
+                      size: 64, color: t.isDark ? AppColors.gold.withValues(alpha: 0.2) : Colors.grey.shade300),
                   const SizedBox(height: 16),
                   const Text('No saved carts',
                       style: TextStyle(

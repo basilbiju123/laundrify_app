@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'
@@ -130,11 +131,12 @@ class _LocationPageState extends State<LocationPage>
     required IconData icon,
     required Color color,
   }) {
+    final t = AppColors.of(context);
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: t.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         contentPadding: const EdgeInsets.all(28),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -249,11 +251,12 @@ class _LocationPageState extends State<LocationPage>
   }
 
   void _showGPSOffDialog() {
+    final t = AppColors.of(context);
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: t.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(children: [
           Container(
@@ -309,10 +312,11 @@ class _LocationPageState extends State<LocationPage>
     required String message,
     required VoidCallback onSettings,
   }) {
+    final t = AppColors.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: t.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(children: [
           Container(
@@ -481,7 +485,7 @@ class _LocationPageState extends State<LocationPage>
       body: Container(
         width: size.width,
         height: size.height,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,

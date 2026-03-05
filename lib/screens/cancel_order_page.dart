@@ -16,9 +16,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // balance is below a threshold.
 // ═══════════════════════════════════════════════════════════
 
-const _cNavy = Color(0xFF080F1E);
-const _cCard = Color(0xFF111827);
-const _cBorder = Color(0xFF1C2537);
 const _cBlue = Color(0xFF1B4FD8);
 const _cBlueSoft = Color(0xFF3B82F6);
 const _cGreen = Color(0xFF10B981);
@@ -71,7 +68,8 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
   // ── Cashback calculation ───────────────────────────────────
   double get _orderTotal =>
-      (widget.orderData['total'] ?? widget.orderData['totalAmount'] ?? 0).toDouble();
+      (widget.orderData['total'] ?? widget.orderData['totalAmount'] ?? 0)
+          .toDouble();
 
   String get _orderStatus => widget.orderData['status'] ?? 'confirmed';
 
@@ -95,18 +93,25 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
   double get _cashbackAmount => _orderTotal * _cashbackPercent;
 
-  bool get _canCancel =>
-      !['delivered', 'cancelled'].contains(_orderStatus);
+  bool get _canCancel => !['delivered', 'cancelled'].contains(_orderStatus);
 
   String get _cashbackLabel {
-    if (_cashbackPercent == 1.0) return '100% Refund';
-    if (_cashbackPercent == 0.5) return '50% Refund';
+    if (_cashbackPercent == 1.0) {
+      return '100% Refund';
+    }
+    if (_cashbackPercent == 0.5) {
+      return '50% Refund';
+    }
     return 'No Refund';
   }
 
   Color get _cashbackColor {
-    if (_cashbackPercent == 1.0) return _cGreen;
-    if (_cashbackPercent == 0.5) return _cAmber;
+    if (_cashbackPercent == 1.0) {
+      return _cGreen;
+    }
+    if (_cashbackPercent == 0.5) {
+      return _cAmber;
+    }
     return _cRose;
   }
 
@@ -148,7 +153,9 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
       setState(() => _step = 1);
     } else if (_step == 1) {
       if (_refundMethod == 'bank') {
-        if (!_bankFormKey.currentState!.validate()) return;
+        if (!_bankFormKey.currentState!.validate()) {
+          return;
+        }
       } else if (_refundMethod == 'upi') {
         if (_upiCtrl.text.trim().isEmpty) {
           _showSnack('Please enter your UPI ID', _cRose);
@@ -160,7 +167,9 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
   }
 
   void _prevStep() {
-    if (_step > 0) setState(() => _step--);
+    if (_step > 0) {
+      setState(() => _step--);
+    }
   }
 
   void _showSnack(String msg, Color color) {
@@ -180,7 +189,9 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Not logged in');
+      if (user == null) {
+        throw Exception('Not logged in');
+      }
       final db = FirebaseFirestore.instance;
 
       // 1. Mark order as cancelled
@@ -210,16 +221,8 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
         cancelData['refundUpiId'] = _upiCtrl.text.trim();
       }
 
-      // Update under global orders and user's subcollection
+      // Update only the global orders collection (Firestore rules allow this)
       final batch = db.batch();
-
-      // User's order subcollection
-      final userOrderRef = db
-          .collection('users')
-          .doc(user.uid)
-          .collection('orders')
-          .doc(widget.orderId);
-      batch.update(userOrderRef, cancelData);
 
       // Global orders collection (if exists)
       final globalOrderRef = db.collection('orders').doc(widget.orderId);
@@ -243,7 +246,8 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
         batch.set(txnRef, {
           'type': 'cashback',
           'amount': _cashbackAmount,
-          'description': 'Cashback for cancelled order #${widget.orderId.substring(0, 8).toUpperCase()}',
+          'description':
+              'Cashback for cancelled order #${widget.orderId.substring(0, 8).toUpperCase()}',
           'orderId': widget.orderId,
           'createdAt': FieldValue.serverTimestamp(),
           'status': 'completed',
@@ -262,12 +266,13 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
         'refundStatus': _refundMethod == 'wallet' ? 'completed' : 'initiated',
         'cancellationReason': reason,
         'createdAt': FieldValue.serverTimestamp(),
-        if (_refundMethod == 'bank') 'bankDetails': {
-          'accountName': _accountNameCtrl.text.trim(),
-          'accountNumber': _accountNumberCtrl.text.trim(),
-          'ifsc': _ifscCtrl.text.trim().toUpperCase(),
-          'bankName': _bankNameCtrl.text.trim(),
-        },
+        if (_refundMethod == 'bank')
+          'bankDetails': {
+            'accountName': _accountNameCtrl.text.trim(),
+            'accountNumber': _accountNumberCtrl.text.trim(),
+            'ifsc': _ifscCtrl.text.trim().toUpperCase(),
+            'bankName': _bankNameCtrl.text.trim(),
+          },
         if (_refundMethod == 'upi') 'upiId': _upiCtrl.text.trim(),
       });
 
@@ -286,58 +291,83 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _cNavy,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            if (_step < 3) _buildStepIndicator(),
-            Expanded(child: _buildBody()),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Header ────────────────────────────────────────────────
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: Row(
+      // Always navy background — cancel page is always dark-themed
+      backgroundColor: const Color(0xFF080F1E),
+      body: Column(
         children: [
-          GestureDetector(
-            onTap: () => _step == 0 ? Navigator.pop(context) : _prevStep(),
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 18),
+          _buildHeader(),
+          Expanded(
+            child: Column(
+              children: [
+                if (_step < 3) _buildStepIndicator(),
+                Expanded(child: _buildBody()),
+              ],
             ),
-          ),
-          const SizedBox(width: 14),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Cancel Order',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white),
-              ),
-              Text(
-                '#${widget.orderId.substring(0, 8).toUpperCase()}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-              ),
-            ],
           ),
         ],
       ),
     );
   }
 
+  // ── Header ────────────────────────────────────────────────
+  Widget _buildHeader() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF080F1E), Color(0xFF0D1F3C)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () => _step == 0 ? Navigator.pop(context) : _prevStep(),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  child: const Icon(Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white, size: 18),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Cancel Order',
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white),
+                  ),
+                  Text(
+                    '#\${widget.orderId.substring(0, 8).toUpperCase()}',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Step Indicator ─────────────────────────────────────────
   Widget _buildStepIndicator() {
+    // Fixed dark-themed colors — page is always dark navy background
+    const stepLine   = Color(0xFF1E3A5F);
+    const stepInactive = Color(0xFF1A2540);
+    const stepBorder = Color(0xFF2D4A6F);
     final steps = ['Reason', 'Refund', 'Confirm'];
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -347,7 +377,7 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
             return Expanded(
               child: Container(
                 height: 2,
-                color: i ~/ 2 < _step ? _cBlue : _cBorder,
+                color: i ~/ 2 < _step ? _cBlue : stepLine,
               ),
             );
           }
@@ -358,19 +388,25 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: done ? _cBlue : active ? _cBlue.withValues(alpha: 0.2) : _cCard,
+              color: done
+                  ? _cBlue
+                  : active
+                      ? _cBlue.withValues(alpha: 0.2)
+                      : stepInactive,
               shape: BoxShape.circle,
-              border: Border.all(color: (done || active) ? _cBlue : _cBorder, width: 1.5),
+              border: Border.all(
+                  color: (done || active) ? _cBlue : stepBorder, width: 1.5),
             ),
             child: Center(
               child: done
-                  ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                  ? const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 16)
                   : Text(
                       '${idx + 1}',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: active ? Colors.white : const Color(0xFF475569),
+                        color: active ? Colors.white : const Color(0xFF64748B),
                       ),
                     ),
             ),
@@ -382,13 +418,20 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
   // ── Body Router ───────────────────────────────────────────
   Widget _buildBody() {
-    if (!_canCancel) return _buildCannotCancel();
+    if (!_canCancel) {
+      return _buildCannotCancel();
+    }
     switch (_step) {
-      case 0: return _buildReasonStep();
-      case 1: return _buildRefundStep();
-      case 2: return _buildConfirmStep();
-      case 3: return _buildDoneStep();
-      default: return const SizedBox();
+      case 0:
+        return _buildReasonStep();
+      case 1:
+        return _buildRefundStep();
+      case 2:
+        return _buildConfirmStep();
+      case 3:
+        return _buildDoneStep();
+      default:
+        return const SizedBox();
     }
   }
 
@@ -408,14 +451,19 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
             child: const Icon(Icons.block_rounded, color: _cRose, size: 52),
           ),
           const SizedBox(height: 20),
-          const Text('Cannot Cancel', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
+          const Text('Cannot Cancel',
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white)),
           const SizedBox(height: 8),
           Text(
             _orderStatus == 'delivered'
                 ? 'This order has already been delivered.'
                 : 'This order has already been cancelled.',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8), height: 1.6),
+            style: const TextStyle(
+                fontSize: 14, color: Color(0xFF94A3B8), height: 1.6),
           ),
           const SizedBox(height: 28),
           SizedBox(
@@ -425,9 +473,14 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _cBlue,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text('Go Back', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+              child: const Text('Go Back',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white)),
             ),
           ),
         ]),
@@ -453,34 +506,52 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               border: Border.all(color: _cashbackColor.withValues(alpha: 0.3)),
             ),
             child: Row(children: [
-              Icon(Icons.account_balance_wallet_rounded, color: _cashbackColor, size: 28),
+              Icon(Icons.account_balance_wallet_rounded,
+                  color: _cashbackColor, size: 28),
               const SizedBox(width: 14),
-              Expanded(child: Column(
+              Expanded(
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_cashbackLabel, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: _cashbackColor)),
+                  Text(_cashbackLabel,
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: _cashbackColor)),
                   const SizedBox(height: 2),
-                  Text(_cashbackReason, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), height: 1.4)),
+                  Text(_cashbackReason,
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF94A3B8), height: 1.4)),
                 ],
               )),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text(
                   '₹${_cashbackAmount.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _cashbackColor),
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: _cashbackColor),
                 ),
                 Text(
                   'of ₹${_orderTotal.toStringAsFixed(0)}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                  style:
+                      const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                 ),
               ]),
             ]),
           ),
 
           const SizedBox(height: 24),
-          const Text('Reason for Cancellation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+          const Text('Reason for Cancellation',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF94A3B8))),
           const SizedBox(height: 10),
 
           ..._reasons.map((r) {
+            const tCard = Color(0xFF1A2540);
+            const tCardBdr = Color(0xFF2D3A52);
             final selected = _selectedReason == r;
             return GestureDetector(
               onTap: () => setState(() => _selectedReason = r),
@@ -488,22 +559,38 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: selected ? _cBlue.withValues(alpha: 0.1) : _cCard,
+                  color: selected ? _cBlue.withValues(alpha: 0.1) : tCard,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: selected ? _cBlue.withValues(alpha: 0.5) : _cBorder, width: selected ? 1.5 : 1),
+                  border: Border.all(
+                      color:
+                          selected ? _cBlue.withValues(alpha: 0.5) : tCardBdr,
+                      width: selected ? 1.5 : 1),
                 ),
                 child: Row(children: [
                   Container(
-                    width: 20, height: 20,
+                    width: 20,
+                    height: 20,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: selected ? _cBlue : Colors.transparent,
-                      border: Border.all(color: selected ? _cBlue : const Color(0xFF334155), width: 2),
+                      border: Border.all(
+                          color: selected ? _cBlue : const Color(0xFF334155),
+                          width: 2),
                     ),
-                    child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 12) : null,
+                    child: selected
+                        ? const Icon(Icons.check_rounded,
+                            color: Colors.white, size: 12)
+                        : null,
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(r, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? Colors.white : const Color(0xFF94A3B8)))),
+                  Expanded(
+                      child: Text(r,
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: selected
+                                  ? Colors.white
+                                  : const Color(0xFF94A3B8)))),
                 ]),
               ),
             );
@@ -517,11 +604,20 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               maxLines: 3,
               decoration: InputDecoration(
                 hintText: 'Please describe your reason...',
-                hintStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
-                filled: true, fillColor: _cCard,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _cBorder)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _cBorder)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _cBlueSoft, width: 1.5)),
+                hintStyle:
+                    const TextStyle(color: Color(0xFF475569), fontSize: 13),
+                filled: true,
+                fillColor: const Color(0xFF1A2540),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF2D3A52))),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF2D3A52))),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        const BorderSide(color: _cBlueSoft, width: 1.5)),
               ),
             ),
           ],
@@ -534,9 +630,14 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _cBlue,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text('Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+              child: const Text('Continue',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white)),
             ),
           ),
           const SizedBox(height: 20),
@@ -554,15 +655,39 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
         key: _bankFormKey,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 8),
-          const Text('Refund Method', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+          const Text('Refund Method',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF94A3B8))),
           const SizedBox(height: 10),
 
           // Method selector
           ...[
-            {'id': 'wallet', 'label': 'Laundrify Wallet', 'sub': 'Instant — No details needed', 'icon': Icons.account_balance_wallet_rounded, 'color': _cGreen},
-            {'id': 'upi', 'label': 'UPI Transfer', 'sub': 'Within 24 hours', 'icon': Icons.phone_android_rounded, 'color': _cBlueSoft},
-            {'id': 'bank', 'label': 'Bank Transfer (NEFT)', 'sub': '3–5 working days', 'icon': Icons.account_balance_rounded, 'color': _cAmber},
+            {
+              'id': 'wallet',
+              'label': 'Laundrify Wallet',
+              'sub': 'Instant — No details needed',
+              'icon': Icons.account_balance_wallet_rounded,
+              'color': _cGreen
+            },
+            {
+              'id': 'upi',
+              'label': 'UPI Transfer',
+              'sub': 'Within 24 hours',
+              'icon': Icons.phone_android_rounded,
+              'color': _cBlueSoft
+            },
+            {
+              'id': 'bank',
+              'label': 'Bank Transfer (NEFT)',
+              'sub': '3–5 working days',
+              'icon': Icons.account_balance_rounded,
+              'color': _cAmber
+            },
           ].map((m) {
+            const tCard = Color(0xFF1A2540);
+            const tCardBdr = Color(0xFF2D3A52);
             final selected = _refundMethod == m['id'];
             final color = m['color'] as Color;
             return GestureDetector(
@@ -571,9 +696,11 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: selected ? color.withValues(alpha: 0.1) : _cCard,
+                  color: selected ? color.withValues(alpha: 0.1) : tCard,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: selected ? color.withValues(alpha: 0.5) : _cBorder, width: selected ? 1.5 : 1),
+                  border: Border.all(
+                      color: selected ? color.withValues(alpha: 0.5) : tCardBdr,
+                      width: selected ? 1.5 : 1),
                 ),
                 child: Row(children: [
                   Container(
@@ -585,14 +712,24 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
                     child: Icon(m['icon'] as IconData, color: color, size: 20),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Column(
+                  Expanded(
+                      child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(m['label'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: selected ? Colors.white : const Color(0xFF94A3B8))),
-                      Text(m['sub'] as String, style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                      Text(m['label'] as String,
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: selected
+                                  ? Colors.white
+                                  : const Color(0xFF94A3B8))),
+                      Text(m['sub'] as String,
+                          style: const TextStyle(
+                              fontSize: 11, color: Color(0xFF475569))),
                     ],
                   )),
-                  if (selected) Icon(Icons.check_circle_rounded, color: color, size: 20),
+                  if (selected)
+                    Icon(Icons.check_circle_rounded, color: color, size: 20),
                 ]),
               ),
             );
@@ -602,20 +739,44 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
           // UPI field
           if (_refundMethod == 'upi') ...[
-            const Text('UPI Details', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+            const Text('UPI Details',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF94A3B8))),
             const SizedBox(height: 10),
-            _buildField(controller: _upiCtrl, label: 'UPI ID', hint: 'yourname@upi', icon: Icons.phone_android_rounded),
+            _buildField(
+                controller: _upiCtrl,
+                label: 'UPI ID',
+                hint: 'yourname@upi',
+                icon: Icons.phone_android_rounded),
             const SizedBox(height: 8),
-            _infoBox('Enter your UPI ID (e.g. 9876543210@okaxis). The refund will be processed within 24 hours.', _cBlueSoft),
+            _infoBox(
+                'Enter your UPI ID (e.g. 9876543210@okaxis). The refund will be processed within 24 hours.',
+                _cBlueSoft),
           ],
 
           // Bank fields
           if (_refundMethod == 'bank') ...[
-            const Text('Bank Account Details', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+            const Text('Bank Account Details',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF94A3B8))),
             const SizedBox(height: 10),
-            _buildField(controller: _accountNameCtrl, label: 'Account Holder Name', hint: 'Full name as in bank', icon: Icons.person_rounded, validator: (v) => v!.trim().isEmpty ? 'Required' : null),
+            _buildField(
+                controller: _accountNameCtrl,
+                label: 'Account Holder Name',
+                hint: 'Full name as in bank',
+                icon: Icons.person_rounded,
+                validator: (v) => v!.trim().isEmpty ? 'Required' : null),
             const SizedBox(height: 10),
-            _buildField(controller: _bankNameCtrl, label: 'Bank Name', hint: 'e.g. State Bank of India', icon: Icons.account_balance_rounded, validator: (v) => v!.trim().isEmpty ? 'Required' : null),
+            _buildField(
+                controller: _bankNameCtrl,
+                label: 'Bank Name',
+                hint: 'e.g. State Bank of India',
+                icon: Icons.account_balance_rounded,
+                validator: (v) => v!.trim().isEmpty ? 'Required' : null),
             const SizedBox(height: 10),
             _buildField(
               controller: _accountNumberCtrl,
@@ -625,8 +786,12 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Required';
-                if (v.trim().length < 9) return 'Account number too short';
+                if (v == null || v.trim().isEmpty) {
+                  return 'Required';
+                }
+                if (v.trim().length < 9) {
+                  return 'Account number too short';
+                }
                 return null;
               },
             ),
@@ -639,7 +804,9 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) {
-                if (v != _accountNumberCtrl.text) return 'Account numbers do not match';
+                if (v != _accountNumberCtrl.text) {
+                  return 'Account numbers do not match';
+                }
                 return null;
               },
             ),
@@ -650,19 +817,26 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               hint: 'e.g. SBIN0001234',
               icon: Icons.tag_rounded,
               validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Required';
-                if (!RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$').hasMatch(v.trim().toUpperCase())) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'Required';
+                }
+                if (!RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$')
+                    .hasMatch(v.trim().toUpperCase())) {
                   return 'Invalid IFSC code format';
                 }
                 return null;
               },
             ),
             const SizedBox(height: 8),
-            _infoBox('Bank transfers take 3–5 working days. Ensure all details are correct. Incorrect details may delay or fail the refund.', _cAmber),
+            _infoBox(
+                'Bank transfers take 3–5 working days. Ensure all details are correct. Incorrect details may delay or fail the refund.',
+                _cAmber),
           ],
 
           if (_refundMethod == 'wallet')
-            _infoBox('₹${_cashbackAmount.toStringAsFixed(0)} will be added to your Laundrify Wallet instantly after cancellation.', _cGreen),
+            _infoBox(
+                '₹${_cashbackAmount.toStringAsFixed(0)} will be added to your Laundrify Wallet instantly after cancellation.',
+                _cGreen),
 
           const SizedBox(height: 28),
           SizedBox(
@@ -672,9 +846,14 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _cBlue,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text('Review & Confirm', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+              child: const Text('Review & Confirm',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white)),
             ),
           ),
           const SizedBox(height: 20),
@@ -685,7 +864,9 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
 
   // ── STEP 2: Confirm ───────────────────────────────────────
   Widget _buildConfirmStep() {
-    final reason = _selectedReason == 'Other' ? _otherReasonCtrl.text.trim() : _selectedReason!;
+    final reason = _selectedReason == 'Other'
+        ? _otherReasonCtrl.text.trim()
+        : _selectedReason!;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       physics: const BouncingScrollPhysics(),
@@ -703,20 +884,33 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
           child: const Row(children: [
             Icon(Icons.warning_amber_rounded, color: _cRose, size: 22),
             SizedBox(width: 12),
-            Expanded(child: Text('This action is irreversible. Once cancelled, the order cannot be restored.', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8), height: 1.5))),
+            Expanded(
+                child: Text(
+                    'This action is irreversible. Once cancelled, the order cannot be restored.',
+                    style: TextStyle(
+                        fontSize: 12, color: Color(0xFF94A3B8), height: 1.5))),
           ]),
         ),
 
         const SizedBox(height: 20),
-        const Text('Order Summary', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+        const Text('Order Summary',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF94A3B8))),
         const SizedBox(height: 10),
-        _summaryRow('Order ID', '#${widget.orderId.substring(0, 8).toUpperCase()}'),
+        _summaryRow(
+            'Order ID', '#${widget.orderId.substring(0, 8).toUpperCase()}'),
         _summaryRow('Order Total', '₹${_orderTotal.toStringAsFixed(2)}'),
         _summaryRow('Current Status', _orderStatus.toUpperCase()),
         _summaryRow('Cancellation Reason', reason),
 
         const SizedBox(height: 16),
-        const Text('Cashback Details', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+        const Text('Cashback Details',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF94A3B8))),
         const SizedBox(height: 10),
 
         Container(
@@ -728,35 +922,63 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
           ),
           child: Column(children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Cashback Amount', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
-              Text('₹${_cashbackAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: _cashbackColor)),
+              const Text('Cashback Amount',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+              Text('₹${_cashbackAmount.toStringAsFixed(2)}',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: _cashbackColor)),
             ]),
             const SizedBox(height: 6),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Refund Method', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+              const Text('Refund Method',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
               Text(
-                _refundMethod == 'wallet' ? 'Laundrify Wallet' : _refundMethod == 'upi' ? 'UPI Transfer' : 'Bank Transfer',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                _refundMethod == 'wallet'
+                    ? 'Laundrify Wallet'
+                    : _refundMethod == 'upi'
+                        ? 'UPI Transfer'
+                        : 'Bank Transfer',
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white),
               ),
             ]),
             if (_refundMethod == 'upi') ...[
               const SizedBox(height: 6),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('UPI ID', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
-                Text(_upiCtrl.text.trim(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                const Text('UPI ID',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+                Text(_upiCtrl.text.trim(),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
               ]),
             ],
             if (_refundMethod == 'bank') ...[
               const SizedBox(height: 6),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('Account', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
-                Text('****${_accountNumberCtrl.text.trim().length > 4 ? _accountNumberCtrl.text.trim().substring(_accountNumberCtrl.text.trim().length - 4) : _accountNumberCtrl.text.trim()}',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                const Text('Account',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+                Text(
+                    '****${_accountNumberCtrl.text.trim().length > 4 ? _accountNumberCtrl.text.trim().substring(_accountNumberCtrl.text.trim().length - 4) : _accountNumberCtrl.text.trim()}',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
               ]),
               const SizedBox(height: 6),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('IFSC', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
-                Text(_ifscCtrl.text.trim().toUpperCase(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                const Text('IFSC',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+                Text(_ifscCtrl.text.trim().toUpperCase(),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
               ]),
             ],
           ]),
@@ -771,11 +993,20 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
               backgroundColor: _cRose,
               disabledBackgroundColor: _cRose.withValues(alpha: 0.5),
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
             ),
             child: _isProcessing
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                : const Text('Confirm Cancellation', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2.5))
+                : const Text('Confirm Cancellation',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white)),
           ),
         ),
         const SizedBox(height: 20),
@@ -794,17 +1025,26 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
             decoration: BoxDecoration(
               color: _cashbackColor.withValues(alpha: 0.15),
               shape: BoxShape.circle,
-              border: Border.all(color: _cashbackColor.withValues(alpha: 0.4), width: 2),
+              border: Border.all(
+                  color: _cashbackColor.withValues(alpha: 0.4), width: 2),
             ),
-            child: Icon(Icons.check_circle_rounded, color: _cashbackColor, size: 64),
+            child: Icon(Icons.check_circle_rounded,
+                color: _cashbackColor, size: 64),
           ),
           const SizedBox(height: 24),
-          const Text('Order Cancelled', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.white)),
+          const Text('Order Cancelled',
+              style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white)),
           const SizedBox(height: 10),
           if (_cashbackAmount > 0) ...[
             Text(
               '₹${_cashbackAmount.toStringAsFixed(0)} cashback initiated',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _cashbackColor),
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _cashbackColor),
             ),
             const SizedBox(height: 6),
             Text(
@@ -814,28 +1054,37 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
                       ? 'UPI transfer will be completed within 24 hours.'
                       : 'Bank transfer will be completed in 3–5 working days.',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8), height: 1.6),
+              style: const TextStyle(
+                  fontSize: 13, color: Color(0xFF94A3B8), height: 1.6),
             ),
           ] else
             const Text(
               'No refund applicable for this stage of the order.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8), height: 1.6),
+              style: TextStyle(
+                  fontSize: 13, color: Color(0xFF94A3B8), height: 1.6),
             ),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pop(context);
-                Navigator.pop(context);
+                // popUntil safely navigates back without causing a black
+                // screen even if there is only one page on the stack
+                int popsNeeded = 2;
+                Navigator.of(context).popUntil((_) => popsNeeded-- <= 0);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _cBlue,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text('Back to Orders', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+              child: const Text('Back to Orders',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white)),
             ),
           ),
         ]),
@@ -854,7 +1103,11 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
     String? Function(String?)? validator,
   }) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+      Text(label,
+          style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF94A3B8))),
       const SizedBox(height: 6),
       TextFormField(
         controller: controller,
@@ -866,12 +1119,23 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
           hintText: hint,
           hintStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
           prefixIcon: Icon(icon, color: const Color(0xFF475569), size: 18),
-          filled: true, fillColor: _cCard,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cBorder)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cBorder)),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cBlueSoft, width: 1.5)),
-          errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cRose)),
-          focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _cRose, width: 1.5)),
+          filled: true,
+          fillColor: const Color(0xFF1A2540),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF2D3A52))),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF2D3A52))),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: _cBlueSoft, width: 1.5)),
+          errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: _cRose)),
+          focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: _cRose, width: 1.5)),
         ),
       ),
     ]);
@@ -881,8 +1145,17 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(children: [
-        Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)))),
-        Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+        Expanded(
+            child: Text(label,
+                style:
+                    const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)))),
+        Expanded(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white))),
       ]),
     );
   }
@@ -899,7 +1172,10 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(Icons.info_outline_rounded, color: color, size: 16),
         const SizedBox(width: 8),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), height: 1.5))),
+        Expanded(
+            child: Text(text,
+                style: const TextStyle(
+                    fontSize: 11, color: Color(0xFF94A3B8), height: 1.5))),
       ]),
     );
   }

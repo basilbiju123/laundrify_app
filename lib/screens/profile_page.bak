@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
-import '../theme/app_theme.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -14,6 +13,8 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   static const _navy = Color(0xFF080F1E);
   static const _gold = Color(0xFFF5C518);
+  static const _bg = Color(0xFFF0F4FF);
+  static const _card = Colors.white;
 
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
@@ -56,15 +57,22 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _saveProfile() async {
     setState(() => _isSaving = true);
     try {
-      await _authService.updateUserProfile(name: _nameCtrl.text.trim());
       final uid = _auth.currentUser?.uid;
-      if (uid != null) {
-        await _db.collection('users').doc(uid).update({
-          'name': _nameCtrl.text.trim(),
-          'phone': _phoneCtrl.text.trim(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
+      if (uid == null) throw Exception('Not logged in');
+
+      // Update Firebase Auth display name
+      await _auth.currentUser!.updateDisplayName(_nameCtrl.text.trim());
+
+      // Update Firestore — use set+merge so phone field is created if missing
+      await _db.collection('users').doc(uid).set({
+        'name':      _nameCtrl.text.trim(),
+        'phone':     _phoneCtrl.text.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Reload profile to reflect changes
+      await _loadProfile();
+
       if (mounted) {
         setState(() => _isEditing = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -78,7 +86,11 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('❌ Update failed: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {
@@ -89,17 +101,18 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final user = _auth.currentUser;
-    final initials = (_userData['name'] as String? ?? user?.displayName ?? 'U')
-        .split(' ')
-        .map((w) => w.isNotEmpty ? w[0] : '')
-        .take(2)
-        .join()
-        .toUpperCase();
+    final initials =
+        (_userData['name'] as String? ?? user?.displayName ?? 'U')
+            .split(' ')
+            .map((w) => w.isNotEmpty ? w[0] : '')
+            .take(2)
+            .join()
+            .toUpperCase();
 
     return Scaffold(
-      backgroundColor: AppColors.of(context).bg,
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: AppColors.navy,
+        backgroundColor: _navy,
         foregroundColor: Colors.white,
         title: const Text(
           'My Profile',
@@ -172,7 +185,7 @@ class _ProfilePageState extends State<ProfilePage> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppColors.of(context).card,
+                  color: _card,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
@@ -194,11 +207,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _buildField(
-                        _nameCtrl, 'Full Name', Icons.person_outline_rounded),
+                    _buildField(_nameCtrl, 'Full Name', Icons.person_outline_rounded),
                     const SizedBox(height: 14),
-                    _buildField(
-                        _phoneCtrl, 'Phone Number', Icons.phone_outlined,
+                    _buildField(_phoneCtrl, 'Phone Number', Icons.phone_outlined,
                         keyboard: TextInputType.phone),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -236,7 +247,7 @@ class _ProfilePageState extends State<ProfilePage> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppColors.of(context).card,
+                  color: _card,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
@@ -251,7 +262,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     _infoRow(Icons.person_outline_rounded, 'Name',
                         _userData['name'] ?? user?.displayName ?? '-'),
                     const Divider(height: 20, color: Color(0xFFE8EDF5)),
-                    _infoRow(Icons.email_outlined, 'Email', user?.email ?? '-'),
+                    _infoRow(Icons.email_outlined, 'Email',
+                        user?.email ?? '-'),
                     const Divider(height: 20, color: Color(0xFFE8EDF5)),
                     _infoRow(Icons.phone_outlined, 'Phone',
                         _userData['phone'] ?? '-'),
@@ -259,9 +271,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     _infoRow(
                       Icons.verified_user_outlined,
                       'Email Verified',
-                      user?.emailVerified ?? false
-                          ? '✅ Verified'
-                          : '⚠️ Not verified',
+                      user?.emailVerified ?? false ? '✅ Verified' : '⚠️ Not verified',
                     ),
                   ],
                 ),
@@ -273,7 +283,7 @@ class _ProfilePageState extends State<ProfilePage> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppColors.of(context).card,
+                  color: _card,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
@@ -286,22 +296,17 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _statCol('Total Orders', '${_userData['totalOrders'] ?? 0}',
+                    _statCol('Total Orders',
+                        '${_userData['totalOrders'] ?? 0}',
                         Icons.shopping_bag_rounded, _gold),
-                    Container(
-                        width: 1, height: 40, color: const Color(0xFFE8EDF5)),
-                    _statCol(
-                        'Loyalty Points',
+                    Container(width: 1, height: 40, color: const Color(0xFFE8EDF5)),
+                    _statCol('Loyalty Points',
                         '${_userData['loyaltyPoints'] ?? 0}',
-                        Icons.stars_rounded,
-                        const Color(0xFF8B5CF6)),
-                    Container(
-                        width: 1, height: 40, color: const Color(0xFFE8EDF5)),
-                    _statCol(
-                        'Total Spent',
+                        Icons.stars_rounded, const Color(0xFF8B5CF6)),
+                    Container(width: 1, height: 40, color: const Color(0xFFE8EDF5)),
+                    _statCol('Total Spent',
                         '₹${((_userData['totalSpent'] ?? 0) as num).toStringAsFixed(0)}',
-                        Icons.currency_rupee_rounded,
-                        const Color(0xFF10B981)),
+                        Icons.currency_rupee_rounded, const Color(0xFF10B981)),
                   ],
                 ),
               ),
@@ -327,7 +332,8 @@ class _ProfilePageState extends State<ProfilePage> {
                           borderRadius: BorderRadius.circular(20)),
                       title: const Text('Sign Out',
                           style: TextStyle(fontWeight: FontWeight.w800)),
-                      content: const Text('Are you sure you want to sign out?'),
+                      content:
+                          const Text('Are you sure you want to sign out?'),
                       actions: [
                         TextButton(
                             onPressed: () => Navigator.pop(ctx, false),
@@ -362,16 +368,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildField(TextEditingController ctrl, String label, IconData icon,
       {TextInputType? keyboard}) {
-    final t = AppColors.of(context);
     return TextField(
       controller: ctrl,
       keyboardType: keyboard,
-      style: TextStyle(color: t.textHi, fontSize: 14),
+      style: const TextStyle(color: _navy, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, color: const Color(0xFF94A3B8), size: 20),
         filled: true,
-        fillColor: AppColors.of(context).input,
+        fillColor: _bg,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         border: OutlineInputBorder(
@@ -387,30 +392,27 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _infoRow(IconData icon, String label, String value) {
-    final t = AppColors.of(context);
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: const Color(0xFF94A3B8)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF94A3B8))),
-              Text(value,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: t.textHi)),
-            ],
+  Widget _infoRow(IconData icon, String label, String value) => Row(
+        children: [
+          Icon(icon, size: 18, color: const Color(0xFF94A3B8)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF94A3B8))),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: _navy)),
+              ],
+            ),
           ),
-        ),
-      ],
-    );
-  }
+        ],
+      );
 
   Widget _statCol(String label, String value, IconData icon, Color color) =>
       Column(
@@ -422,7 +424,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   fontSize: 16, fontWeight: FontWeight.w900, color: color)),
           const SizedBox(height: 2),
           Text(label,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+              style:
+                  const TextStyle(fontSize: 11, color: Color(0xFF475569))),
         ],
       );
 }

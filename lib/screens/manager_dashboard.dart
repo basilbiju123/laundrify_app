@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'app_theme.dart';
+import '../services/panel_theme_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════
 // MANAGER DASHBOARD — Complete with order assignment, staff mgmt,
@@ -59,15 +60,19 @@ class _ManagerDashboardState extends State<ManagerDashboard>
             .where('status', isEqualTo: 'pending')
             .count()
             .get(),
-        _db.collection('orders').where('status', whereIn: [
-          'assigned',
-          'accepted',
-          'pickup',
-          'processing',
-          'out_for_delivery',
-          'reached',
-          'picked'
-        ]).count().get(),
+        _db
+            .collection('orders')
+            .where('status', whereIn: [
+              'assigned',
+              'accepted',
+              'pickup',
+              'processing',
+              'out_for_delivery',
+              'reached',
+              'picked'
+            ])
+            .count()
+            .get(),
         _db
             .collection('orders')
             .where('status', whereIn: ['delivered', 'completed'])
@@ -99,13 +104,14 @@ class _ManagerDashboardState extends State<ManagerDashboard>
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final user = _auth.currentUser;
     final name = user?.displayName ?? 'Manager';
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
+    final content = AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: LTheme.bg,
+        backgroundColor: lt.bg,
         body: SafeArea(
           child: Column(
             children: [
@@ -125,9 +131,13 @@ class _ManagerDashboardState extends State<ManagerDashboard>
                     _OrdersTab(
                       db: _db,
                       statuses: const [
-                        'assigned', 'accepted', 'pickup',
-                        'processing', 'out_for_delivery',
-                        'reached', 'picked'
+                        'assigned',
+                        'accepted',
+                        'pickup',
+                        'processing',
+                        'out_for_delivery',
+                        'reached',
+                        'picked'
                       ],
                       label: 'active',
                       emptyIcon: Icons.local_laundry_service_outlined,
@@ -147,13 +157,15 @@ class _ManagerDashboardState extends State<ManagerDashboard>
         ),
       ),
     );
+    return PanelThemeScope(panelKey: 'manager', child: content);
   }
 
   // ── Header ───────────────────────────────────────────────────
   Widget _buildHeader(String name) {
+    final lt = DynTheme.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LTheme.headerGradient,
+      decoration: BoxDecoration(
+        gradient: DynTheme.headerGradient,
       ),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
       child: Row(
@@ -178,11 +190,11 @@ class _ManagerDashboardState extends State<ManagerDashboard>
             height: 44,
             decoration: BoxDecoration(
               gradient:
-                  const LinearGradient(colors: [LTheme.gold, LTheme.goldSoft]),
+                  const LinearGradient(colors: [DynTheme.gold, DynTheme.goldSoft]),
               borderRadius: BorderRadius.circular(13),
               boxShadow: [
                 BoxShadow(
-                    color: LTheme.gold.withValues(alpha: 0.35),
+                    color: DynTheme.gold.withValues(alpha: 0.35),
                     blurRadius: 10,
                     offset: const Offset(0, 3)),
               ],
@@ -193,7 +205,7 @@ class _ManagerDashboardState extends State<ManagerDashboard>
                 style: const TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w900,
-                    color: LTheme.navy),
+                    color: DynTheme.navy),
               ),
             ),
           ),
@@ -209,9 +221,9 @@ class _ManagerDashboardState extends State<ManagerDashboard>
                       fontWeight: FontWeight.w800,
                       color: Colors.white),
                 ),
-                const Text(
+                Text(
                   'Branch Manager',
-                  style: TextStyle(fontSize: 12, color: LTheme.textMid),
+                  style: TextStyle(fontSize: 12, color: lt.textMid),
                 ),
               ],
             ),
@@ -221,15 +233,26 @@ class _ManagerDashboardState extends State<ManagerDashboard>
           const SizedBox(width: 8),
           _iconBtn(Icons.refresh_rounded, _load),
           const SizedBox(width: 6),
+          // Dark mode toggle — affects only Manager panel
+          Builder(builder: (ctx) {
+            PanelThemeService? pt;
+            try { pt = PanelThemeScope.of(ctx); } catch (_) {}
+            if (pt == null) return const SizedBox.shrink();
+            return _iconBtn(
+              pt.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              () => pt!.toggle(),
+            );
+          }),
+          const SizedBox(width: 6),
           _iconBtn(
             Icons.logout_rounded,
             () async {
               await _auth.signOut();
               if (!mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
-                      (r) => false,
-                    );
+                MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                (r) => false,
+              );
             },
           ),
         ],
@@ -254,16 +277,16 @@ class _ManagerDashboardState extends State<ManagerDashboard>
   Widget _buildStatsRow() {
     if (_loading) {
       return Container(
-        color: LTheme.navy,
+        color: DynTheme.navy,
         height: 78,
         child: const Center(
-          child: CircularProgressIndicator(color: LTheme.gold, strokeWidth: 2),
+          child: CircularProgressIndicator(color: DynTheme.gold, strokeWidth: 2),
         ),
       );
     }
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LTheme.headerGradient,
+      decoration: BoxDecoration(
+        gradient: DynTheme.headerGradient,
         borderRadius: BorderRadius.only(
           bottomLeft: Radius.circular(28),
           bottomRight: Radius.circular(28),
@@ -272,21 +295,21 @@ class _ManagerDashboardState extends State<ManagerDashboard>
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
       child: Row(
         children: [
-          _statChip('Pending', '$_pendingOrders', LTheme.amber,
+          _statChip('Pending', '$_pendingOrders', DynTheme.amber,
               Icons.pending_actions_rounded),
-          _statChip('Active', '$_activeOrders', LTheme.blueSoft,
+          _statChip('Active', '$_activeOrders', DynTheme.blueSoft,
               Icons.local_shipping_rounded),
-          _statChip('Done Today', '$_completedToday', LTheme.emerald,
+          _statChip('Done Today', '$_completedToday', DynTheme.emerald,
               Icons.check_circle_rounded),
-          _statChip('Online', '$_staffOnline', LTheme.gold,
-              Icons.person_rounded),
+          _statChip(
+              'Online', '$_staffOnline', DynTheme.gold, Icons.person_rounded),
         ],
       ),
     );
   }
 
-  Widget _statChip(
-      String label, String val, Color color, IconData icon) {
+  Widget _statChip(String label, String val, Color color, IconData icon) {
+    final lt = DynTheme.of(context);
     return Expanded(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -302,13 +325,11 @@ class _ManagerDashboardState extends State<ManagerDashboard>
             const SizedBox(height: 5),
             Text(val,
                 style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w900,
-                    color: color)),
+                    fontSize: 17, fontWeight: FontWeight.w900, color: color)),
             Text(label,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 9,
-                    color: LTheme.textMid,
+                    color: lt.textMid,
                     fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center),
           ],
@@ -319,14 +340,15 @@ class _ManagerDashboardState extends State<ManagerDashboard>
 
   // ── Tab Bar ──────────────────────────────────────────────────
   Widget _buildTabBar() {
+    final lt = DynTheme.of(context);
     return Container(
-      color: LTheme.bg,
+      color: lt.bg,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
       child: Container(
         decoration: BoxDecoration(
-          color: LTheme.card,
+          color: lt.card,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: LTheme.cardBdr),
+          border: Border.all(color: lt.cardBdr),
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
@@ -340,29 +362,26 @@ class _ManagerDashboardState extends State<ManagerDashboard>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           indicator: BoxDecoration(
-            gradient: const LinearGradient(
-                colors: [LTheme.gold, LTheme.goldSoft]),
+            gradient:
+                const LinearGradient(colors: [DynTheme.gold, DynTheme.goldSoft]),
             borderRadius: BorderRadius.circular(11),
             boxShadow: [
               BoxShadow(
-                  color: LTheme.gold.withValues(alpha: 0.4), blurRadius: 8),
+                  color: DynTheme.gold.withValues(alpha: 0.4), blurRadius: 8),
             ],
           ),
-          labelColor: LTheme.navy,
-          unselectedLabelColor: LTheme.textMid,
+          labelColor: DynTheme.navy,
+          unselectedLabelColor: lt.textMid,
           labelStyle:
               const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
           unselectedLabelStyle:
               const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           dividerColor: Colors.transparent,
           tabs: [
-            _tab('Pending', Icons.pending_actions_rounded,
-                LTheme.amber, 0),
-            _tab('Active', Icons.local_shipping_rounded,
-                LTheme.blueSoft, 1),
-            _tab('Completed', Icons.check_circle_rounded,
-                LTheme.emerald, 2),
-            _tab('Staff', Icons.badge_outlined, LTheme.violet, 3),
+            _tab('Pending', Icons.pending_actions_rounded, DynTheme.amber, 0),
+            _tab('Active', Icons.local_shipping_rounded, DynTheme.blueSoft, 1),
+            _tab('Completed', Icons.check_circle_rounded, DynTheme.emerald, 2),
+            _tab('Staff', Icons.badge_outlined, DynTheme.violet, 3),
           ],
         ),
       ),
@@ -375,8 +394,7 @@ class _ManagerDashboardState extends State<ManagerDashboard>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon,
-              size: 14, color: active ? LTheme.navy : color),
+          Icon(icon, size: 14, color: active ? DynTheme.navy : color),
           const SizedBox(width: 5),
           Text(label),
         ],
@@ -410,8 +428,8 @@ class _OrdersTab extends StatelessWidget {
       builder: (ctx, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
-            child: CircularProgressIndicator(
-                color: LTheme.gold, strokeWidth: 2),
+            child:
+                CircularProgressIndicator(color: DynTheme.gold, strokeWidth: 2),
           );
         }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
@@ -423,7 +441,7 @@ class _OrdersTab extends StatelessWidget {
                     ? 'Orders in progress show here'
                     : 'Completed orders appear here',
             icon: emptyIcon,
-            color: LTheme.gold,
+            color: DynTheme.gold,
           );
         }
         return ListView.builder(
@@ -455,13 +473,12 @@ class _StaffTab extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: db
           .collection('users')
-          .where('role', whereIn: ['delivery', 'staff', 'employee'])
-          .snapshots(),
+          .where('role', whereIn: ['delivery', 'staff', 'manager']).snapshots(),
       builder: (ctx, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
-            child: CircularProgressIndicator(
-                color: LTheme.gold, strokeWidth: 2),
+            child:
+                CircularProgressIndicator(color: DynTheme.gold, strokeWidth: 2),
           );
         }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
@@ -476,15 +493,15 @@ class _StaffTab extends StatelessWidget {
           physics: const BouncingScrollPhysics(),
           itemCount: snap.data!.docs.length,
           itemBuilder: (_, i) {
+            final lt = DynTheme.of(context);
             final d = snap.data!.docs[i].data() as Map<String, dynamic>;
             final role = d['role'] ?? 'staff';
             final online = d['isOnline'] ?? d['isActive'] ?? false;
-            final color =
-                role == 'delivery' ? LTheme.gold : LTheme.violet;
+            final color = role == 'delivery' ? DynTheme.gold : DynTheme.violet;
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(16),
-              decoration: LTheme.cardBox(),
+              decoration: lt.cardBox(),
               child: Row(
                 children: [
                   Stack(
@@ -513,28 +530,52 @@ class _StaffTab extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(d['name'] ?? 'Employee',
-                            style: LTheme.heading(14)),
+                            style: lt.heading(14)),
                         const SizedBox(height: 3),
                         Text(
                           d['phone'] ?? d['email'] ?? '',
-                          style: LTheme.label(12),
+                          style: lt.label(12),
                         ),
                         const SizedBox(height: 4),
                         Row(children: [
                           _pill(
                             '${d['completedOrders'] ?? 0} done',
-                            LTheme.emerald,
+                            DynTheme.emerald,
                             Icons.check_circle_outline_rounded,
                           ),
                           const SizedBox(width: 6),
                           _pill(
                             online ? 'Online' : 'Offline',
-                            online ? LTheme.emerald : LTheme.textDim,
-                            online
-                                ? Icons.circle
-                                : Icons.circle_outlined,
+                            online ? DynTheme.emerald : lt.textDim,
+                            online ? Icons.circle : Icons.circle_outlined,
                           ),
                         ]),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () => _showAssignTaskSheet(
+                              context, snap.data!.docs[i].id, d),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: color.withValues(alpha: 0.25)),
+                            ),
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.assignment_rounded,
+                                  color: color, size: 12),
+                              const SizedBox(width: 4),
+                              Text('Assign Job',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: color)),
+                            ]),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -548,9 +589,149 @@ class _StaffTab extends StatelessWidget {
     );
   }
 
+  void _showAssignTaskSheet(
+      BuildContext context, String staffId, Map<String, dynamic> staffData) {
+    final lt = DynTheme.of(context);
+    final taskCtrl = TextEditingController();
+    bool isLoading = false;
+    final name = staffData['name'] ?? 'Staff';
+    final color = (staffData['role'] ?? 'staff') == 'delivery'
+        ? DynTheme.gold
+        : DynTheme.violet;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx2, setLocal) => Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx2).viewInsets.bottom),
+          child: Container(
+            decoration: BoxDecoration(
+              color: lt.card,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                        color: lt.cardBdr,
+                        borderRadius: BorderRadius.circular(2))),
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12)),
+                    child:
+                        Icon(Icons.assignment_rounded, color: color, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Assign Task', style: lt.heading(17)),
+                        Text('To: $name', style: lt.label(13)),
+                      ]),
+                ]),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: taskCtrl,
+                  maxLines: 3,
+                  style: TextStyle(color: lt.textHi, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText:
+                        'Describe the task (e.g. Process order #ABC123, wash 5 shirts...)',
+                    hintStyle:
+                        TextStyle(color: lt.textDim, fontSize: 13),
+                    filled: true,
+                    fillColor: lt.bg,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: lt.cardBdr)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: lt.cardBdr)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide:
+                            const BorderSide(color: DynTheme.gold, width: 2)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: DynTheme.navy,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    onPressed: isLoading
+                        ? null
+                        : () async {
+                            if (taskCtrl.text.trim().isEmpty) return;
+                            setLocal(() => isLoading = true);
+                            try {
+                              await db.collection('staff_tasks').add({
+                                'assignedTo': staffId,
+                                'staffName': name,
+                                'task': taskCtrl.text.trim(),
+                                'status': 'assigned',
+                                'createdAt': FieldValue.serverTimestamp(),
+                              });
+                              await db.collection('users').doc(staffId).update({
+                                'activeOrders': FieldValue.increment(1),
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+                              if (ctx2.mounted) Navigator.pop(ctx2);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content: Text('✓ Task assigned to $name'),
+                                  backgroundColor: DynTheme.emerald,
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
+                                  margin: const EdgeInsets.all(16),
+                                ));
+                              }
+                            } catch (e) {
+                              setLocal(() => isLoading = false);
+                            }
+                          },
+                    child: isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: DynTheme.navy))
+                        : const Text('ASSIGN TASK',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900, letterSpacing: 1)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _pill(String label, Color color, IconData icon) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
@@ -561,9 +742,7 @@ class _StaffTab extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: color)),
+                  fontSize: 10, fontWeight: FontWeight.w700, color: color)),
         ]),
       );
 }
@@ -599,14 +778,12 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
         .get();
     if (!mounted) return;
 
-    final agents = snap.docs
-        .map((d) => {'id': d.id, ...d.data()})
-        .toList();
+    final agents = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
 
     if (agents.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('No delivery agents available'),
-        backgroundColor: LTheme.rose,
+        backgroundColor: DynTheme.rose,
       ));
       return;
     }
@@ -618,10 +795,7 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
         agents: agents,
         onAssign: (agent) async {
           try {
-            await widget.db
-                .collection('orders')
-                .doc(widget.orderId)
-                .update({
+            await widget.db.collection('orders').doc(widget.orderId).update({
               'status': 'assigned',
               'assignedTo': agent['id'],
               'driverName': agent['name'] ?? 'Driver',
@@ -631,9 +805,8 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
             });
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(
-                    '✓ Assigned to ${agent['name'] ?? 'Driver'}'),
-                backgroundColor: LTheme.emerald,
+                content: Text('✓ Assigned to ${agent['name'] ?? 'Driver'}'),
+                backgroundColor: DynTheme.emerald,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -644,7 +817,7 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text('Error: $e'),
-                backgroundColor: LTheme.rose,
+                backgroundColor: DynTheme.rose,
               ));
             }
           }
@@ -655,13 +828,13 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
 
   @override
   Widget build(BuildContext context) {
-    final ts =
-        (widget.data['createdAt'] as Timestamp?)?.toDate();
+    final lt = DynTheme.of(context);
+    final ts = (widget.data['createdAt'] as Timestamp?)?.toDate();
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: LTheme.cardBox(
+      decoration: lt.cardBox(
           borderColor: _color.withValues(alpha: 0.22),
           glow: _status == 'pending'),
       child: Column(
@@ -670,15 +843,12 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
           GestureDetector(
             onTap: () => setState(() => _expanded = !_expanded),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
                 color: _color.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.vertical(
                   top: const Radius.circular(18),
-                  bottom: _expanded
-                      ? Radius.zero
-                      : const Radius.circular(18),
+                  bottom: _expanded ? Radius.zero : const Radius.circular(18),
                 ),
               ),
               child: Row(
@@ -689,8 +859,7 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                       color: _color.withValues(alpha: 0.13),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(lStatusIcon(_status),
-                        color: _color, size: 16),
+                    child: Icon(lStatusIcon(_status), color: _color, size: 16),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -699,11 +868,11 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                       children: [
                         Text(
                           widget.data['customerName'] ?? 'Customer',
-                          style: LTheme.heading(14),
+                          style: lt.heading(14),
                         ),
                         Text(
                           '#${widget.orderId.substring(0, 8).toUpperCase()}  •  ${widget.data['serviceType'] ?? 'Laundry'}',
-                          style: LTheme.label(11),
+                          style: lt.label(11),
                         ),
                       ],
                     ),
@@ -719,10 +888,10 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                       const SizedBox(height: 4),
                       Text(
                         '₹${((widget.data['total'] ?? widget.data['totalAmount'] ?? 0) as num).toStringAsFixed(0)}',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w900,
-                            color: LTheme.textHi),
+                            color: lt.textHi),
                       ),
                     ],
                   ),
@@ -731,7 +900,7 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                     _expanded
                         ? Icons.keyboard_arrow_up_rounded
                         : Icons.keyboard_arrow_down_rounded,
-                    color: LTheme.textDim,
+                    color: lt.textDim,
                     size: 20,
                   ),
                 ],
@@ -749,8 +918,11 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                   _detailRow(Icons.phone_outlined,
                       widget.data['customerPhone'] ?? 'N/A'),
                   const SizedBox(height: 8),
-                  _detailRow(Icons.location_on_outlined,
-                      widget.data['pickupAddress'] ?? widget.data['address'] ?? 'N/A'),
+                  _detailRow(
+                      Icons.location_on_outlined,
+                      widget.data['pickupAddress'] ??
+                          widget.data['address'] ??
+                          'N/A'),
                   const SizedBox(height: 8),
                   _detailRow(
                     Icons.schedule_rounded,
@@ -763,7 +935,7 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                     _detailRow(
                       Icons.delivery_dining_rounded,
                       'Assigned to ${widget.data['driverName']}',
-                      valueColor: LTheme.gold,
+                      valueColor: DynTheme.gold,
                     ),
                   ],
                 ],
@@ -780,11 +952,11 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                     padding: const EdgeInsets.symmetric(vertical: 13),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                          colors: [LTheme.gold, LTheme.goldSoft]),
+                          colors: [DynTheme.gold, DynTheme.goldSoft]),
                       borderRadius: BorderRadius.circular(13),
                       boxShadow: [
                         BoxShadow(
-                          color: LTheme.gold.withValues(alpha: 0.4),
+                          color: DynTheme.gold.withValues(alpha: 0.4),
                           blurRadius: 10,
                           offset: const Offset(0, 3),
                         ),
@@ -794,14 +966,14 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.delivery_dining_rounded,
-                            color: LTheme.navy, size: 18),
+                            color: DynTheme.navy, size: 18),
                         SizedBox(width: 8),
                         Text(
                           'Assign Delivery Agent',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w900,
-                            color: LTheme.navy,
+                            color: DynTheme.navy,
                           ),
                         ),
                       ],
@@ -816,21 +988,20 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
     );
   }
 
-  Widget _detailRow(IconData icon, String text,
-      {Color? valueColor}) {
+  Widget _detailRow(IconData icon, String text, {Color? valueColor}) {
+    final lt = DynTheme.of(context);
     return Row(
       children: [
-        Icon(icon, size: 13, color: LTheme.textDim),
+        Icon(icon, size: 13, color: lt.textDim),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
             style: TextStyle(
               fontSize: 12,
-              color: valueColor ?? LTheme.textMid,
-              fontWeight: valueColor != null
-                  ? FontWeight.w700
-                  : FontWeight.w500,
+              color: valueColor ?? lt.textMid,
+              fontWeight:
+                  valueColor != null ? FontWeight.w700 : FontWeight.w500,
             ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -849,12 +1020,13 @@ class _AssignSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.55,
       ),
-      decoration: const BoxDecoration(
-        color: LTheme.card,
+      decoration: BoxDecoration(
+        color: lt.card,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
@@ -866,7 +1038,7 @@ class _AssignSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: LTheme.cardBdr,
+              color: lt.cardBdr,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -877,17 +1049,16 @@ class _AssignSheet extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: LTheme.gold.withValues(alpha: 0.1),
+                  color: DynTheme.gold.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.delivery_dining_rounded,
-                    color: LTheme.gold, size: 20),
+                    color: DynTheme.gold, size: 20),
               ),
               const SizedBox(width: 12),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Assign Agent', style: LTheme.heading(17)),
-                Text('Select a delivery agent',
-                    style: LTheme.label(13)),
+                Text('Assign Agent', style: lt.heading(17)),
+                Text('Select a delivery agent', style: lt.label(13)),
               ]),
             ]),
           ),
@@ -910,23 +1081,21 @@ class _AssignSheet extends StatelessWidget {
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(14),
-                    decoration: LTheme.cardBox(
+                    decoration: lt.cardBox(
                         borderColor: online
-                            ? LTheme.emerald.withValues(alpha: 0.3)
+                            ? DynTheme.emerald.withValues(alpha: 0.3)
                             : null),
                     child: Row(children: [
                       Stack(children: [
                         CircleAvatar(
                           radius: 22,
-                          backgroundColor:
-                              LTheme.gold.withValues(alpha: 0.1),
+                          backgroundColor: DynTheme.gold.withValues(alpha: 0.1),
                           child: Text(
-                            (a['name'] as String? ?? 'D')[0]
-                                .toUpperCase(),
+                            (a['name'] as String? ?? 'D')[0].toUpperCase(),
                             style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w900,
-                                color: LTheme.gold),
+                                color: DynTheme.gold),
                           ),
                         ),
                         Positioned(
@@ -940,9 +1109,8 @@ class _AssignSheet extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(a['name'] ?? 'Driver',
-                                style: LTheme.heading(14)),
-                            Text(a['phone'] ?? '',
-                                style: LTheme.label(12)),
+                                style: lt.heading(14)),
+                            Text(a['phone'] ?? '', style: lt.label(12)),
                           ],
                         ),
                       ),
@@ -954,16 +1122,13 @@ class _AssignSheet extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: online
-                                    ? LTheme.emerald
-                                    : LTheme.textDim,
+                                color: online ? DynTheme.emerald : lt.textDim,
                               ),
                             ),
                             Text(
                               '${a['completedOrders'] ?? 0} orders',
-                              style: const TextStyle(
-                                  fontSize: 10,
-                                  color: LTheme.textDim),
+                              style: TextStyle(
+                                  fontSize: 10, color: lt.textDim),
                             ),
                           ]),
                     ]),

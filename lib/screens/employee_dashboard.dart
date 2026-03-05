@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'app_theme.dart';
+import '../services/panel_theme_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════
 // EMPLOYEE / LAUNDRY STAFF DASHBOARD
@@ -109,7 +110,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
             const SizedBox(width: 8),
             Text('Updated to ${next.replaceAll('_', ' ')}'),
           ]),
-          backgroundColor: LTheme.emerald,
+          backgroundColor: DynTheme.emerald,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12)),
@@ -120,7 +121,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Error: $e'),
-          backgroundColor: LTheme.rose,
+          backgroundColor: DynTheme.rose,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12)),
@@ -132,14 +133,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final user = _auth.currentUser;
     final uid = user?.uid;
     final name = user?.displayName ?? 'Staff';
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
+    final content = AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: LTheme.bg,
+        backgroundColor: lt.bg,
         body: SafeArea(
           child: Column(
             children: [
@@ -150,9 +152,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
               const SizedBox(height: 6),
               Expanded(
                 child: uid == null
-                    ? const Center(
+                    ? Center(
                         child: Text('Not logged in',
-                            style: TextStyle(color: LTheme.textMid)))
+                            style: TextStyle(color: lt.textMid)))
                     : TabBarView(
                         controller: _tabCtrl,
                         children: [
@@ -166,14 +168,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         ),
       ),
     );
+    return PanelThemeScope(panelKey: 'employee', child: content);
   }
 
   // ── Header ───────────────────────────────────────────────────
   Widget _buildHeader(String? uid, String name) {
+    final lt = DynTheme.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-      decoration: const BoxDecoration(
-        gradient: LTheme.headerGradient,
+      decoration: BoxDecoration(
+        gradient: DynTheme.headerGradient,
       ),
       child: Row(
         children: [
@@ -197,11 +201,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
             height: 46,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                  colors: [LTheme.gold, LTheme.goldSoft]),
+                  colors: [DynTheme.gold, DynTheme.goldSoft]),
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                    color: LTheme.gold.withValues(alpha: 0.35),
+                    color: DynTheme.gold.withValues(alpha: 0.35),
                     blurRadius: 10,
                     offset: const Offset(0, 3)),
               ],
@@ -212,7 +216,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                 style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
-                    color: LTheme.navy),
+                    color: DynTheme.navy),
               ),
             ),
           ),
@@ -228,9 +232,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                       fontWeight: FontWeight.w800,
                       color: Colors.white),
                 ),
-                const Text('Laundry Staff',
+                Text('Laundry Staff',
                     style:
-                        TextStyle(fontSize: 12, color: LTheme.textMid)),
+                        TextStyle(fontSize: 12, color: lt.textMid)),
               ],
             ),
           ),
@@ -240,6 +244,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
             StreamBuilder<DocumentSnapshot>(
               stream: _db.collection('users').doc(uid).snapshots(),
               builder: (ctx, snap) {
+                final lt = DynTheme.of(context);
                 final isActive =
                     (snap.data?.data() as Map<String, dynamic>?)?[
                             'isActive'] ??
@@ -255,12 +260,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: isActive
-                          ? LTheme.emerald.withValues(alpha: 0.15)
+                          ? DynTheme.emerald.withValues(alpha: 0.15)
                           : Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                           color: isActive
-                              ? LTheme.emerald.withValues(alpha: 0.4)
+                              ? DynTheme.emerald.withValues(alpha: 0.4)
                               : Colors.white.withValues(alpha: 0.15)),
                     ),
                     child: Row(
@@ -272,8 +277,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: isActive
-                                ? LTheme.emerald
-                                : LTheme.textDim,
+                                ? DynTheme.emerald
+                                : lt.textDim,
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -283,8 +288,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
                             color: isActive
-                                ? LTheme.emerald
-                                : LTheme.textMid,
+                                ? DynTheme.emerald
+                                : lt.textMid,
                           ),
                         ),
                       ],
@@ -294,6 +299,28 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
               },
             ),
 
+          const SizedBox(width: 8),
+          // Dark mode toggle — Employee panel only
+          Builder(builder: (ctx) {
+            PanelThemeService? pt;
+            try { pt = PanelThemeScope.of(ctx); } catch (_) {}
+            if (pt == null) return const SizedBox.shrink();
+            return GestureDetector(
+              onTap: () => pt!.toggle(),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.15)),
+                ),
+                child: Icon(
+                    pt.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                    color: Colors.white, size: 18),
+              ),
+            );
+          }),
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () async {
@@ -340,8 +367,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                 (d.data() as Map)['status'] == 'delivered')
             .length;
         return Container(
-          decoration: const BoxDecoration(
-            gradient: LTheme.headerGradient,
+          decoration: BoxDecoration(
+            gradient: DynTheme.headerGradient,
             borderRadius: BorderRadius.only(
               bottomLeft: Radius.circular(24),
               bottomRight: Radius.circular(24),
@@ -349,13 +376,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
           ),
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
           child: Row(children: [
-            _statCard('$active', 'Active', LTheme.gold,
+            _statCard('$active', 'Active', DynTheme.gold,
                 Icons.pending_actions_rounded),
             const SizedBox(width: 10),
-            _statCard('$done', 'Delivered', LTheme.emerald,
+            _statCard('$done', 'Delivered', DynTheme.emerald,
                 Icons.check_circle_rounded),
             const SizedBox(width: 10),
-            _statCard('${docs.length}', 'Total', LTheme.blueSoft,
+            _statCard('${docs.length}', 'Total', DynTheme.blueSoft,
                 Icons.receipt_long_rounded),
           ]),
         );
@@ -365,6 +392,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   Widget _statCard(
       String val, String label, Color color, IconData icon) {
+    final lt = DynTheme.of(context);
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -386,9 +414,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         fontWeight: FontWeight.w900,
                         color: color)),
                 Text(label,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 10,
-                        color: LTheme.textMid,
+                        color: lt.textMid,
                         fontWeight: FontWeight.w600)),
               ],
             ),
@@ -400,14 +428,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   // ── Tab Bar ──────────────────────────────────────────────────
   Widget _buildTabBar() {
+    final lt = DynTheme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
-          color: LTheme.card,
+          color: lt.card,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: LTheme.cardBdr),
+          border: Border.all(color: lt.cardBdr),
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
@@ -418,17 +447,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
           controller: _tabCtrl,
           indicator: BoxDecoration(
             gradient:
-                const LinearGradient(colors: [LTheme.gold, LTheme.goldSoft]),
+                const LinearGradient(colors: [DynTheme.gold, DynTheme.goldSoft]),
             borderRadius: BorderRadius.circular(11),
             boxShadow: [
               BoxShadow(
-                  color: LTheme.gold.withValues(alpha: 0.4),
+                  color: DynTheme.gold.withValues(alpha: 0.4),
                   blurRadius: 8,
                   offset: const Offset(0, 2)),
             ],
           ),
-          labelColor: LTheme.navy,
-          unselectedLabelColor: LTheme.textMid,
+          labelColor: DynTheme.navy,
+          unselectedLabelColor: lt.textMid,
           labelStyle:
               const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
           unselectedLabelStyle:
@@ -467,7 +496,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         ? _db
             .collection('orders')
             .where('assignedTo', isEqualTo: uid)
-            .where('status', whereNotIn: ['delivered', 'cancelled'])
+            .where('status', whereIn: [
+              'assigned',
+              'accepted',
+              'pickup',
+              'picked',
+              'reached',
+              'processing',
+              'ready',
+              'out_for_delivery',
+              'pending',
+            ])
             .snapshots()
         : _db
             .collection('orders')
@@ -481,7 +520,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
               child: CircularProgressIndicator(
-                  color: LTheme.gold, strokeWidth: 2));
+                  color: DynTheme.gold, strokeWidth: 2));
         }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
           return LEmptyState(
@@ -492,7 +531,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
             icon: active
                 ? Icons.inbox_outlined
                 : Icons.check_circle_outline_rounded,
-            color: active ? LTheme.gold : LTheme.emerald,
+            color: active ? DynTheme.gold : DynTheme.emerald,
           );
         }
         return ListView.builder(
@@ -575,6 +614,7 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final status = widget.data['status'] ?? 'confirmed';
     final color = lStatusColor(status);
     final isTerminal =
@@ -584,7 +624,7 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 14),
-      decoration: LTheme.cardBox(
+      decoration: lt.cardBox(
           borderColor: !isTerminal ? color.withValues(alpha: 0.3) : null),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -620,11 +660,11 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                       children: [
                         Text(
                           widget.data['customerName'] ?? 'Customer',
-                          style: LTheme.heading(14),
+                          style: lt.heading(14),
                         ),
                         Text(
                           '#${widget.orderId.substring(0, 8).toUpperCase()}',
-                          style: LTheme.label(11),
+                          style: lt.label(11),
                         ),
                       ],
                     ),
@@ -640,10 +680,10 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                       const SizedBox(height: 3),
                       Text(
                         '₹${((widget.data['total'] ?? widget.data['totalAmount'] ?? 0) as num).toStringAsFixed(0)}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
-                          color: LTheme.textHi,
+                          color: lt.textHi,
                         ),
                       ),
                     ],
@@ -653,7 +693,7 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                     _expanded
                         ? Icons.keyboard_arrow_up_rounded
                         : Icons.keyboard_arrow_down_rounded,
-                    color: LTheme.textDim,
+                    color: lt.textDim,
                     size: 20,
                   ),
                 ],
@@ -692,18 +732,19 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: LTheme.bg,
+                        color: lt.bg,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: LTheme.cardBdr),
+                        border: Border.all(color: lt.cardBdr),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Services',
-                              style: LTheme.label(11)),
+                              style: lt.label(11)),
                           const SizedBox(height: 6),
                           ...(widget.data['services'] as List)
                               .map((s) {
+                            final lt = DynTheme.of(context);
                             final sName = s['serviceName'] ??
                                 s['name'] ??
                                 '';
@@ -715,13 +756,13 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                                 const Icon(
                                     Icons.local_laundry_service_outlined,
                                     size: 12,
-                                    color: LTheme.gold),
+                                    color: DynTheme.gold),
                                 const SizedBox(width: 6),
                                 Text('$sName — ${items.length} items',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: LTheme.textHi)),
+                                        color: lt.textHi)),
                               ]),
                             );
                           }),
@@ -781,19 +822,19 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
                   horizontal: 14, vertical: 12),
               child: Row(children: [
                 const Icon(Icons.check_circle_rounded,
-                    color: LTheme.emerald, size: 16),
+                    color: DynTheme.emerald, size: 16),
                 const SizedBox(width: 8),
                 const Text('Completed',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: LTheme.emerald)),
+                        color: DynTheme.emerald)),
                 if (widget.data['deliveredAt'] != null) ...[
                   const Spacer(),
                   Text(
                     _fmtTs(widget.data['deliveredAt'] as Timestamp),
-                    style: const TextStyle(
-                        fontSize: 11, color: LTheme.textDim),
+                    style: TextStyle(
+                        fontSize: 11, color: lt.textDim),
                   ),
                 ],
               ]),
@@ -804,17 +845,20 @@ class _EmpOrderCardState extends State<_EmpOrderCard> {
     );
   }
 
-  Widget _row(IconData icon, String text) => Row(children: [
-        Icon(icon, size: 13, color: LTheme.textDim),
+  Widget _row(IconData icon, String text) {
+    final lt = DynTheme.of(context);
+    return Row(children: [
+        Icon(icon, size: 13, color: lt.textDim),
         const SizedBox(width: 8),
         Expanded(
           child: Text(text,
-              style: const TextStyle(
-                  fontSize: 12, color: LTheme.textMid),
+              style: TextStyle(
+                  fontSize: 12, color: lt.textMid),
               maxLines: 2,
               overflow: TextOverflow.ellipsis),
         ),
       ]);
+  }
 
   String _fmtTs(Timestamp ts) {
     final d = ts.toDate();

@@ -176,22 +176,27 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   Future<void> _loadUsers() async {
     try {
       final now = DateTime.now();
-      final todayStart = Timestamp.fromDate(DateTime(now.year, now.month, now.day));
-      final weekStart = Timestamp.fromDate(now.subtract(const Duration(days: 7)));
 
-      final res = await Future.wait([
-        _db.collection('users').where('role', isEqualTo: 'user').get(),
-        _db.collection('users').where('role', isEqualTo: 'user')
-            .where('createdAt', isGreaterThanOrEqualTo: todayStart).get(),
-        _db.collection('users').where('role', isEqualTo: 'user')
-            .where('createdAt', isGreaterThanOrEqualTo: weekStart).get(),
-      ]);
+      // Single query + client-side filtering avoids composite index on (role, createdAt)
+      final usersSnap = await _db.collection('users').where('role', isEqualTo: 'user').get();
+      final todayDt = DateTime(now.year, now.month, now.day);
+      final weekDt = now.subtract(const Duration(days: 7));
+      int total = 0, newToday = 0, newWeek = 0;
+      for (final doc in usersSnap.docs) {
+        final d = doc.data();
+        total++;
+        final ts = (d['createdAt'] as Timestamp?)?.toDate();
+        if (ts != null) {
+          if (ts.isAfter(todayDt)) newToday++;
+          if (ts.isAfter(weekDt)) newWeek++;
+        }
+      }
 
       if (mounted) {
         setState(() {
-          _totalUsers = res[0].docs.length;
-          _newUsersToday = res[1].docs.length;
-          _newUsersWeek = res[2].docs.length;
+          _totalUsers = total;
+          _newUsersToday = newToday;
+          _newUsersWeek = newWeek;
         });
       }
     } catch (e) {
@@ -265,7 +270,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
       color: AdminTheme.gold,
       onRefresh: _loadAll,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
         physics: const BouncingScrollPhysics(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
@@ -326,12 +331,6 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
           _sectionLabel('🕒 Recent Orders'),
           const SizedBox(height: 10),
           _recentOrdersList(),
-          const SizedBox(height: 20),
-
-          // ── MONTHLY VOLUMES ───────────────────────────────────
-          _sectionLabel('📊 Monthly Order Volume'),
-          const SizedBox(height: 10),
-          _monthlyVolumeChart(),
           const SizedBox(height: 32),
         ]),
       ),
@@ -729,43 +728,6 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
           ]);
         }).toList(),
       ),
-    );
-  }
-
-  // ── Monthly volume bars ───────────────────────────────────────────
-  Widget _monthlyVolumeChart() {
-    if (_monthlyData.isEmpty) return const SizedBox.shrink();
-    final maxCnt = _monthlyData.map((e) => e['orders'] as int).reduce(math.max).clamp(1, 999999);
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(
-          height: 110,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: _monthlyData.map((e) {
-              final cnt = (e['orders'] as int).toDouble();
-              final h = (cnt / maxCnt) * 90;
-              return Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-                Text('${e['orders']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AdminTheme.textSecondary)),
-                const SizedBox(height: 3),
-                Container(
-                  width: 26, height: h.clamp(4.0, 90.0),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                      colors: [AdminTheme.violet, Color(0xFF5B21B6)]),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(e['month'], style: AdminTheme.label(10)),
-              ]);
-            }).toList(),
-          ),
-        ),
-      ]),
     );
   }
 

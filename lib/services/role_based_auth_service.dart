@@ -12,30 +12,73 @@ class RoleBasedAuthService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SUPER ADMIN — this email always has full admin access regardless of DB role
+  // SUPER ADMINS
+  //
+  // Two super-admin accounts — both have IDENTICAL permissions and data
+  // visibility across all dashboards, collections, and features.
+  //
+  //   superAdminEmail  → PRIMARY owner  : bsheena056@gmail.com
+  //   superAdminEmail2 → SECONDARY owner: alenpoovan@gmail.com
+  //
+  // The only distinction is hard-delete / danger-zone operations
+  // (e.g. permanently deleting a user document), which are gated to
+  // the primary owner only. All other capabilities are equal.
   // ─────────────────────────────────────────────────────────────────────────
-  static const String superAdminEmail = 'bsheena056@gmail.com';
+  static const String superAdminEmail  = 'bsheena056@gmail.com';   // Primary owner
+  static const String superAdminEmail2 = 'alenpoovan@gmail.com';   // Secondary owner
 
   bool get isSuperAdmin {
+    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
+    return email == superAdminEmail.toLowerCase() ||
+           email == superAdminEmail2.toLowerCase();
+  }
+
+  /// Returns true only for the PRIMARY owner (bsheena056@gmail.com).
+  /// Gate destructive operations (delete users, wipe stats, etc.) behind this.
+  bool get isPrimaryAdmin {
     final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
     return email == superAdminEmail.toLowerCase();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // GET USER ROLE FROM FIRESTORE
-  // ─────────────────────────────────────────────────────────────────────────
+  /// Returns true for the SECONDARY owner (alenpoovan@gmail.com).
+  bool get isSecondaryAdmin {
+    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
+    return email == superAdminEmail2.toLowerCase();
+  }
 
+  /// Can perform destructive / danger-zone operations?
+  /// Both super-admins return true here — restrict only if you specifically
+  /// want to limit the secondary admin, in which case return isPrimaryAdmin.
+  bool get canPerformDangerousActions => isSuperAdmin;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET USER ROLE
+  // Resolution order:
+  //   1. Hard-coded super-admin emails → always admin
+  //   2. /employees/{uid}  → role field (source of truth for employees)
+  //   3. /users/{uid}      → role field (fallback / legacy)
+  // ─────────────────────────────────────────────────────────────────────────
   Future<UserRole> getUserRole() async {
     final user = _auth.currentUser;
     if (user == null) return UserRole.user;
 
-    // Super admin email always gets admin role
+    // Super-admin emails always get admin role immediately
     if (isSuperAdmin) return UserRole.admin;
 
     try {
-      final doc = await _db.collection('users').doc(user.uid).get();
-      if (!doc.exists) return UserRole.user;
-      final roleStr = (doc.data()?['role'] as String?) ?? 'user';
+      // ── Step 1: Check /employees collection first ─────────────────────────
+      final empDoc = await _db.collection('employees').doc(user.uid).get();
+      if (empDoc.exists) {
+        final roleStr = (empDoc.data()?['role'] as String?) ?? '';
+        final role = _parseRole(roleStr);
+        // If a valid employee role is found, use it (skip /users lookup)
+        if (role != UserRole.user) return role;
+      }
+
+      // ── Step 2: Fallback to /users collection ────────────────────────────
+      final userDoc = await _db.collection('users').doc(user.uid).get();
+      if (!userDoc.exists) return UserRole.user;
+      final roleStr = (userDoc.data()?['role'] as String?) ?? 'user';
       return _parseRole(roleStr);
     } catch (_) {
       return UserRole.user;
@@ -43,12 +86,10 @@ class RoleBasedAuthService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // GET ACCESSIBLE ROLES (some users have multiple roles)
+  // GET ACCESSIBLE ROLES (admin can switch between all dashboards)
   // ─────────────────────────────────────────────────────────────────────────
-
   Future<List<UserRole>> getUserAccessibleRoles() async {
     final role = await getUserRole();
-    // Admin can access all dashboards including user
     if (role == UserRole.admin) {
       return [UserRole.user, UserRole.admin, UserRole.manager, UserRole.delivery, UserRole.staff];
     }
@@ -58,7 +99,6 @@ class RoleBasedAuthService {
   // ─────────────────────────────────────────────────────────────────────────
   // GET DASHBOARD ROUTE BASED ON ROLE
   // ─────────────────────────────────────────────────────────────────────────
-
   Future<String> getDashboardRoute() async {
     final role = await getUserRole();
     switch (role) {
@@ -76,9 +116,8 @@ class RoleBasedAuthService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SHOW ROLE SELECTION DIALOG (for multi-role users)
+  // SHOW ROLE SELECTION DIALOG (for multi-role users like admin)
   // ─────────────────────────────────────────────────────────────────────────
-
   Future<String?> showRoleSelectionDialog(BuildContext context) async {
     final roles = await getUserAccessibleRoles();
     if (!context.mounted) return null;
@@ -160,10 +199,9 @@ class RoleBasedAuthService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ROLE MANAGEMENT — Add/Remove roles for users
+  // ROLE MANAGEMENT (legacy — still works via /users, but prefer EmployeeService)
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Assign a role to a user by UID
   Future<void> assignRole(String uid, String role) async {
     await _db.collection('users').doc(uid).update({
       'role': role,
@@ -171,7 +209,6 @@ class RoleBasedAuthService {
     });
   }
 
-  /// Remove a role from a user (set back to 'user')
   Future<void> removeRole(String uid) async {
     await _db.collection('users').doc(uid).update({
       'role': 'user',
@@ -179,7 +216,6 @@ class RoleBasedAuthService {
     });
   }
 
-  /// Add role by email — finds the user and sets their role
   Future<Map<String, dynamic>> addRoleByEmail(String email, String role) async {
     try {
       final snap = await _db
@@ -210,12 +246,28 @@ class RoleBasedAuthService {
     }
   }
 
-  /// Get all users with a specific role
   Stream<QuerySnapshot> getUsersByRole(String role) {
-    return _db
-        .collection('users')
-        .where('role', isEqualTo: role)
-        .snapshots();
+    return _db.collection('users').where('role', isEqualTo: role).snapshots();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHECK IF USER IS BLOCKED
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<bool> isUserBlocked() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    if (isSuperAdmin) return false;
+    try {
+      // Check /employees first, then /users
+      final empDoc = await _db.collection('employees').doc(user.uid).get();
+      if (empDoc.exists) {
+        return empDoc.data()?['isBlocked'] ?? false;
+      }
+      final doc = await _db.collection('users').doc(user.uid).get();
+      return doc.data()?['isBlocked'] ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -269,23 +321,6 @@ class RoleBasedAuthService {
       case 'delivery': return UserRole.delivery;
       case 'staff':    return UserRole.staff;
       default:         return UserRole.user;
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // CHECK IF USER IS BLOCKED
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Future<bool> isUserBlocked() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    // Super admin is never blocked
-    if (isSuperAdmin) return false;
-    try {
-      final doc = await _db.collection('users').doc(user.uid).get();
-      return doc.data()?['isBlocked'] ?? false;
-    } catch (_) {
-      return false;
     }
   }
 }

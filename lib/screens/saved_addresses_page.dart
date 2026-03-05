@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firestore_service.dart';
 
@@ -8,8 +9,6 @@ import '../services/firestore_service.dart';
 // ═══════════════════════════════════════════════════════════
 
 const _navy = Color(0xFF080F1E);
-const _navyCard = Color(0xFF111827);
-const _navyBorder = Color(0xFF1C2537);
 const _blue = Color(0xFF1B4FD8);
 const _blueSoft = Color(0xFF3B82F6);
 const _green = Color(0xFF10B981);
@@ -133,10 +132,11 @@ class SavedAddressesPage extends StatelessWidget {
   }
 
   void _confirmDelete(BuildContext ctx, String addressId, FirestoreService firestore) {
+    final t = AppColors.of(ctx);
     showDialog(
       context: ctx,
       builder: (_) => AlertDialog(
-        backgroundColor: _navyCard,
+        backgroundColor: t.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Address', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
         content: const Text('Are you sure you want to remove this address?', style: TextStyle(color: Color(0xFF94A3B8))),
@@ -153,6 +153,7 @@ class SavedAddressesPage extends StatelessWidget {
   }
 
   void _showAddAddressSheet(BuildContext ctx, FirestoreService firestore) {
+    final t = AppColors.of(ctx);
     final nicknameCtrl = TextEditingController();
     final houseCtrl = TextEditingController();
     final fullAddrCtrl = TextEditingController();
@@ -175,7 +176,7 @@ class SavedAddressesPage extends StatelessWidget {
         builder: (ctx2, setLocal) => Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(color: _navyCard, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+            decoration: BoxDecoration(color: t.card, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -319,6 +320,7 @@ class _AddressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     final d = doc.data() as Map<String, dynamic>;
     final isDefault = d['isDefault'] ?? false;
     final type = d['type'] ?? 'Home';
@@ -330,9 +332,9 @@ class _AddressCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: _navyCard,
+        color: t.card,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDefault ? _gold.withValues(alpha: 0.4) : _navyBorder, width: isDefault ? 1.5 : 1),
+        border: Border.all(color: isDefault ? _gold.withValues(alpha: 0.4) : t.cardBdr, width: isDefault ? 1.5 : 1),
         boxShadow: isDefault ? [BoxShadow(color: _gold.withValues(alpha: 0.08), blurRadius: 16, spreadRadius: 0)] : null,
       ),
       child: Column(
@@ -371,7 +373,7 @@ class _AddressCard extends StatelessWidget {
             ),
           ),
 
-          Container(height: 1, color: _navyBorder),
+          Container(height: 1, color: t.cardBdr),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

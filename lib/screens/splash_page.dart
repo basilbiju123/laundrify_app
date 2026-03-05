@@ -196,7 +196,7 @@ class _SplashPageState extends State<SplashPage>
             // ── Deep radial background gradient ──────────────
             Positioned.fill(
               child: Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: RadialGradient(
                     center: Alignment(0, -0.2),
                     radius: 1.2,

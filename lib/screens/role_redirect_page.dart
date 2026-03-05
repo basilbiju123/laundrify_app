@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/role_based_auth_service.dart';
+import '../models/firestore_models.dart';
 import 'dashboard.dart';
-import 'admin/admin_dashboard.dart';
+import 'admin_switcher.dart';
 import 'manager_dashboard.dart';
 import 'delivery_dashboard.dart';
 import 'employee_dashboard.dart';
@@ -27,33 +28,33 @@ class _RoleRedirectPageState extends State<RoleRedirectPage> {
   }
 
   Future<void> _redirect() async {
-    final accessibleRoles = await _roleService.getUserAccessibleRoles();
+    final role = await _roleService.getUserRole();
 
     if (!mounted) return;
 
-    // Multiple roles → show selection dialog
-    if (accessibleRoles.length > 1) {
-      final route = await _roleService.showRoleSelectionDialog(context);
-      if (!mounted) return;
-      if (route != null) {
-        _navigateTo(route);
-      } else {
-        _navigateTo('/dashboard');
-      }
+    // Admin → AdminSwitcherWrapper (can switch between all 5 dashboards)
+    if (role == UserRole.admin) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const AdminSwitcherWrapper()),
+        (r) => false,
+      );
       return;
     }
 
-    // Single role → navigate directly
+    // Other roles — navigate directly
     final route = await _roleService.getDashboardRoute();
     if (!mounted) return;
 
-    // For regular users: check if location is saved, if not → LocationPage first
+    // Regular users: check if location is saved first
     if (route == '/dashboard') {
       try {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null) {
           final doc = await FirebaseFirestore.instance
-              .collection('users').doc(user.uid).get();
+              .collection('users')
+              .doc(user.uid)
+              .get();
           final data = doc.data();
           final hasLocation = data != null &&
               data['location'] != null &&
@@ -77,7 +78,7 @@ class _RoleRedirectPageState extends State<RoleRedirectPage> {
     Widget page;
     switch (route) {
       case '/admin-dashboard':
-        page = const AdminDashboard();
+        page = const AdminSwitcherWrapper();
         break;
       case '/manager-dashboard':
         page = const ManagerDashboard();

@@ -83,8 +83,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     return Scaffold(
-      backgroundColor: LTheme.bg,
+      backgroundColor: lt.bg,
       body: FadeTransition(
         opacity: _fadeAnim,
         child: Column(
@@ -98,7 +99,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
                   if (snap.connectionState == ConnectionState.waiting) {
                     return const Center(
                       child: CircularProgressIndicator(
-                          color: LTheme.gold, strokeWidth: 2),
+                          color: DynTheme.gold, strokeWidth: 2),
                     );
                   }
                   if (!snap.hasData || snap.data!.docs.isEmpty) {
@@ -135,9 +136,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
   // ── Header ──────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [LTheme.navy, LTheme.navyMid],
+          colors: [DynTheme.navy, DynTheme.navyMid],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -191,13 +192,13 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: LTheme.gold.withValues(alpha: 0.15),
+                  color: DynTheme.gold.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                      color: LTheme.gold.withValues(alpha: 0.3)),
+                      color: DynTheme.gold.withValues(alpha: 0.3)),
                 ),
                 child: const Icon(Icons.receipt_long_rounded,
-                    color: LTheme.gold, size: 20),
+                    color: DynTheme.gold, size: 20),
               ),
             ],
           ),
@@ -209,7 +210,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
   // ── Filter bar ─────────────────────────────────────────────────
   Widget _buildFilterBar() {
     return Container(
-      color: LTheme.navy,
+      color: DynTheme.navy,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Row(
         children: _filters.map((f) {
@@ -227,7 +228,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
               decoration: BoxDecoration(
                 gradient: active
                     ? const LinearGradient(
-                        colors: [LTheme.gold, LTheme.goldSoft])
+                        colors: [DynTheme.gold, DynTheme.goldSoft])
                     : null,
                 color: active ? null : Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
@@ -242,7 +243,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: active ? LTheme.navy : Colors.white,
+                  color: active ? DynTheme.navy : Colors.white,
                 ),
               ),
             ),
@@ -259,14 +260,14 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [LTheme.navy, LTheme.navyMid],
+          colors: [DynTheme.navy, DynTheme.navyMid],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: LTheme.navy.withValues(alpha: 0.25),
+            color: DynTheme.navy.withValues(alpha: 0.25),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -275,7 +276,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
       child: Row(
         children: [
           _summaryItem('Transactions', '$count',
-              Icons.receipt_outlined, LTheme.blueSoft),
+              Icons.receipt_outlined, DynTheme.blueSoft),
           Container(
             width: 1,
             height: 36,
@@ -283,7 +284,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
             margin: const EdgeInsets.symmetric(horizontal: 16),
           ),
           _summaryItem('Total Spent', '₹${spent.toStringAsFixed(0)}',
-              Icons.currency_rupee_rounded, LTheme.gold),
+              Icons.currency_rupee_rounded, DynTheme.gold),
         ],
       ),
     );
@@ -337,7 +338,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage>
           ? 'Try a different filter'
           : 'Your payment history will appear here after your first order.',
       icon: Icons.receipt_long_outlined,
-      color: LTheme.gold,
+      color: DynTheme.gold,
     );
   }
 }
@@ -365,9 +366,9 @@ class _TransactionCard extends StatelessWidget {
   bool get _isCOD => _method.toUpperCase() == 'COD';
 
   Color get _statusColor {
-    if (_isRefunded) return LTheme.rose;
-    if (_isCOD) return LTheme.amber;
-    return LTheme.emerald;
+    if (_isRefunded) return DynTheme.rose;
+    if (_isCOD) return DynTheme.amber;
+    return DynTheme.emerald;
   }
 
   IconData get _statusIcon {
@@ -402,6 +403,7 @@ class _TransactionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final color = _statusColor;
     final services = (data['services'] as List?)
         ?.map((s) => (s['serviceName'] ?? s['name'] ?? '').toString())
@@ -411,7 +413,7 @@ class _TransactionCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: LTheme.card,
+        color: lt.card,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
             color: color.withValues(alpha: 0.2), width: 1.5),
@@ -451,17 +453,17 @@ class _TransactionCard extends StatelessWidget {
                     children: [
                       Text(
                         _shortId,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w900,
-                          color: LTheme.textHi,
+                          color: lt.textHi,
                         ),
                       ),
                       if (services.isNotEmpty)
                         Text(
                           services,
-                          style: const TextStyle(
-                              fontSize: 11, color: LTheme.textDim),
+                          style: TextStyle(
+                              fontSize: 11, color: lt.textDim),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -478,7 +480,7 @@ class _TransactionCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,
-                        color: _isRefunded ? LTheme.rose : LTheme.textHi,
+                        color: _isRefunded ? DynTheme.rose : lt.textHi,
                       ),
                     ),
                     LBadge(
@@ -502,7 +504,7 @@ class _TransactionCard extends StatelessWidget {
                       ? Icons.payments_outlined
                       : Icons.account_balance_wallet_outlined,
                   label: _method,
-                  color: LTheme.blueSoft,
+                  color: DynTheme.blueSoft,
                 ),
                 const SizedBox(width: 8),
                 // Date
@@ -511,12 +513,12 @@ class _TransactionCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Icon(Icons.access_time_rounded,
-                          size: 12, color: LTheme.textDim),
+                          size: 12, color: lt.textDim),
                       const SizedBox(width: 4),
                       Text(
                         _formatDate(data['createdAt']),
-                        style: const TextStyle(
-                            fontSize: 11, color: LTheme.textDim),
+                        style: TextStyle(
+                            fontSize: 11, color: lt.textDim),
                       ),
                     ],
                   ),

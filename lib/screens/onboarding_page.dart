@@ -322,21 +322,23 @@ class _OnboardingPageState extends State<OnboardingPage>
                               ),
                               child: Center(
                                 child: isLast
-                                    ? Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text("GET STARTED",
-                                              style: TextStyle(
-                                                  color:
-                                                      currentPage.accentColor,
-                                                  fontWeight: FontWeight.w900,
-                                                  fontSize: 12,
-                                                  letterSpacing: 0.8)),
-                                          const SizedBox(width: 6),
-                                          Icon(Icons.arrow_forward_rounded,
-                                              color: currentPage.accentColor,
-                                              size: 16),
-                                        ],
+                                    ? FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text("GO",
+                                                style: TextStyle(
+                                                    color: currentPage.accentColor,
+                                                    fontWeight: FontWeight.w900,
+                                                    fontSize: 13,
+                                                    letterSpacing: 0.5)),
+                                            const SizedBox(width: 4),
+                                            Icon(Icons.arrow_forward_rounded,
+                                                color: currentPage.accentColor,
+                                                size: 16),
+                                          ],
+                                        ),
                                       )
                                     : Icon(Icons.arrow_forward_rounded,
                                         color: currentPage.accentColor,

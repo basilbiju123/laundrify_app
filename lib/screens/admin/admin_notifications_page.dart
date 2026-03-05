@@ -89,7 +89,7 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
       physics: const BouncingScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -181,12 +181,21 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
           const SizedBox(height: 16),
 
           StreamBuilder<QuerySnapshot>(
-            stream: _db.collection('notifications').orderBy('createdAt', descending: true).limit(10).snapshots(),
+            stream: _db.collection('notifications').limit(20).snapshots(),
             builder: (ctx, snap) {
               if (!snap.hasData) return const Center(child: CircularProgressIndicator(color: AdminTheme.gold, strokeWidth: 2));
               if (snap.data!.docs.isEmpty) return Center(child: Text('No notifications sent yet', style: AdminTheme.label(13)));
+              final docs = [...snap.data!.docs]..sort((a, b) {
+                final ta = ((a.data() as Map)['createdAt'] as Timestamp?);
+                final tb = ((b.data() as Map)['createdAt'] as Timestamp?);
+                if (ta == null && tb == null) return 0;
+                if (ta == null) return 1;
+                if (tb == null) return -1;
+                return tb.compareTo(ta);
+              });
+              final recent = docs.take(10).toList();
               return Column(
-                children: snap.data!.docs.map((doc) {
+                children: recent.map((doc) {
                   final d = doc.data() as Map<String, dynamic>;
                   final ts = (d['createdAt'] as Timestamp?)?.toDate();
                   return Container(

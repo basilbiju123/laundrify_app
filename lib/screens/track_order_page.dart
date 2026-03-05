@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme/app_theme.dart';
 
 class TrackOrderPage extends StatefulWidget {
   final String orderId;
@@ -13,8 +14,6 @@ class TrackOrderPage extends StatefulWidget {
 class _TrackOrderPageState extends State<TrackOrderPage> {
   static const _navy = Color(0xFF080F1E);
   static const _gold = Color(0xFFF5C518);
-  static const _bg = Color(0xFFF0F4FF);
-  static const _card = Colors.white;
 
   final _db = FirebaseFirestore.instance;
 
@@ -75,10 +74,11 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: _navy,
+        backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
         title: const Text(
           'Track Order',
@@ -87,10 +87,10 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
         elevation: 0,
       ),
       body: widget.orderId.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 'No order to track',
-                style: TextStyle(color: Color(0xFF475569), fontSize: 15),
+                style: TextStyle(color: t.textMid, fontSize: 15),
               ),
             )
           : StreamBuilder<DocumentSnapshot>(
@@ -122,7 +122,7 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: _card,
+                          color: AppColors.of(context).card,
                           borderRadius: BorderRadius.circular(18),
                           boxShadow: [
                             BoxShadow(
@@ -151,19 +151,19 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'Order ID',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Color(0xFF475569),
+                                      color: AppColors.of(context).textMid,
                                     ),
                                   ),
                                   Text(
                                     '#${widget.orderId.substring(0, 8).toUpperCase()}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w900,
-                                      color: _navy,
+                                      color: t.textHi,
                                     ),
                                   ),
                                 ],
@@ -178,19 +178,19 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
 
                       // TRACKING TIMELINE
                       if (!isCancelled) ...[
-                        const Text(
+                        Text(
                           'Order Timeline',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
-                            color: _navy,
+                            color: t.textHi,
                           ),
                         ),
                         const SizedBox(height: 16),
                         Container(
                           padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
-                            color: _card,
+                            color: AppColors.of(context).card,
                             borderRadius: BorderRadius.circular(18),
                             boxShadow: [
                               BoxShadow(
@@ -320,14 +320,14 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: _card,
+                            color: AppColors.of(context).card,
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: Text(
                             'Reason: ${order['cancelReason']}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
-                              color: Color(0xFF475569),
+                              color: AppColors.of(context).textMid,
                             ),
                           ),
                         ),
@@ -336,23 +336,24 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                       const SizedBox(height: 24),
 
                       // DELIVERY AGENT CARD (shown when assigned)
-                      if (order['driverName'] != null) ...[ 
+                      if (order['driverName'] != null) ...[
                         const SizedBox(height: 24),
-                        const Text(
+                        Text(
                           'Delivery Agent',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
-                            color: _navy,
+                            color: t.textHi,
                           ),
                         ),
                         const SizedBox(height: 12),
                         Container(
                           padding: const EdgeInsets.all(18),
                           decoration: BoxDecoration(
-                            color: _card,
+                            color: AppColors.of(context).card,
                             borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: _gold.withValues(alpha: 0.3)),
+                            border:
+                                Border.all(color: _gold.withValues(alpha: 0.3)),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.05),
@@ -367,13 +368,15 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                                 radius: 26,
                                 backgroundColor: _gold.withValues(alpha: 0.15),
                                 child: Text(
-                                  ((order['driverName'] as String?) ?? 'D').isNotEmpty
-                                      ? (order['driverName'] as String)[0].toUpperCase()
+                                  ((order['driverName'] as String?) ?? 'D')
+                                          .isNotEmpty
+                                      ? (order['driverName'] as String)[0]
+                                          .toUpperCase()
                                       : 'D',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w900,
-                                    color: _navy,
+                                    color: t.textHi,
                                   ),
                                 ),
                               ),
@@ -384,10 +387,10 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                                   children: [
                                     Text(
                                       order['driverName'] ?? 'Delivery Agent',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w800,
-                                        color: _navy,
+                                        color: t.textHi,
                                       ),
                                     ),
                                     if (order['driverPhone'] != null)
@@ -404,12 +407,13 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                               if (order['driverPhone'] != null)
                                 GestureDetector(
                                   onTap: () {
-                                    Clipboard.setData(ClipboardData(text: order['driverPhone']));
+                                    Clipboard.setData(ClipboardData(
+                                        text: order['driverPhone']));
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text('Phone number copied'),
                                         behavior: SnackBarBehavior.floating,
-                                        backgroundColor: Color(0xFF0A1628),
+                                        backgroundColor: AppColors.navy,
                                       ),
                                     );
                                   },
@@ -419,7 +423,8 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                                       color: _gold.withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: const Icon(Icons.phone_rounded, color: _navy, size: 20),
+                                    child: const Icon(Icons.phone_rounded,
+                                        color: _navy, size: 20),
                                   ),
                                 ),
                             ],
@@ -429,19 +434,19 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
 
                       // ORDER DETAILS
                       const SizedBox(height: 24),
-                      const Text(
+                      Text(
                         'Order Details',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
-                          color: _navy,
+                          color: t.textHi,
                         ),
                       ),
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: _card,
+                          color: AppColors.of(context).card,
                           borderRadius: BorderRadius.circular(18),
                           boxShadow: [
                             BoxShadow(
@@ -482,12 +487,13 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF475569))),
+                style: TextStyle(
+                    fontSize: 13, color: AppColors.of(context).textMid)),
             Text(value,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF0A1628))),
+                    color: AppColors.of(context).textHi)),
           ],
         ),
       );
@@ -495,7 +501,7 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
   /// Safely format pickupDate — handles both String (dd/mm/yyyy) and Timestamp
   String _safeFormatPickupDate(dynamic val) {
     if (val == null) return '';
-    if (val is String) return val;                     // already formatted string
+    if (val is String) return val; // already formatted string
     if (val is Timestamp) {
       final dt = val.toDate();
       return '${dt.day}/${dt.month}/${dt.year}';

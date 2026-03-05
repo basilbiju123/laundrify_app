@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,10 +8,6 @@ import '../services/firestore_service.dart';
 const _navy = Color(0xFF080F1E);
 const _blue = Color(0xFF1B4FD8);
 const _gold = Color(0xFFF5C518);
-const _surface = Color(0xFFF0F4FF);
-const _textDark = Color(0xFF0A1628);
-const _textMid = Color(0xFF475569);
-const _textFade = Color(0xFF94A3B8);
 
 class CouponsPage extends StatefulWidget {
   const CouponsPage({super.key});
@@ -177,8 +174,9 @@ class _CouponsPageState extends State<CouponsPage>
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _surface,
+      backgroundColor: t.bg,
       appBar: AppBar(
         elevation: 0,
         backgroundColor: _navy,
@@ -224,6 +222,7 @@ class _CouponsPageState extends State<CouponsPage>
 
   Widget _buildCouponsList(List<Map<String, dynamic>> coupons, bool isAvailable) {
     if (coupons.isEmpty) {
+      final t = AppColors.of(context);
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -233,7 +232,7 @@ class _CouponsPageState extends State<CouponsPage>
                   ? Icons.local_offer_outlined
                   : Icons.history_rounded,
               size: 80,
-              color: _textFade,
+              color: t.textDim,
             ),
             const SizedBox(height: 16),
             Text(
@@ -243,7 +242,7 @@ class _CouponsPageState extends State<CouponsPage>
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: _textMid,
+                color: t.textMid,
               ),
             ),
             const SizedBox(height: 8),
@@ -253,7 +252,7 @@ class _CouponsPageState extends State<CouponsPage>
                   : 'Your used coupons will appear here',
               style: TextStyle(
                 fontSize: 13,
-                color: _textFade,
+                color: t.textDim,
               ),
             ),
           ],
@@ -275,6 +274,7 @@ class _CouponsPageState extends State<CouponsPage>
   }
 
   Widget _buildCouponCard(Map<String, dynamic> coupon, bool isAvailable) {
+    final t = AppColors.of(context);
     final discount = coupon['discount'];
     final discountType = coupon['discountType'];
     final validUntil = coupon['validUntil'] as DateTime?;
@@ -291,7 +291,7 @@ class _CouponsPageState extends State<CouponsPage>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isAvailable
-              ? [Colors.white, _surface]
+              ? [Colors.white, t.surface]
               : [Colors.grey.shade300, Colors.grey.shade400],
         ),
         borderRadius: BorderRadius.circular(20),
@@ -401,7 +401,7 @@ class _CouponsPageState extends State<CouponsPage>
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w900,
-                    color: isAvailable ? _textDark : Colors.grey.shade700,
+                    color: isAvailable ? t.textHi : Colors.grey.shade700,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -409,7 +409,7 @@ class _CouponsPageState extends State<CouponsPage>
                   coupon['description'] ?? '',
                   style: TextStyle(
                     fontSize: 13,
-                    color: isAvailable ? _textMid : Colors.grey.shade600,
+                    color: isAvailable ? t.textMid : Colors.grey.shade600,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -419,14 +419,14 @@ class _CouponsPageState extends State<CouponsPage>
                     Icon(
                       Icons.info_outline_rounded,
                       size: 14,
-                      color: isAvailable ? _textFade : Colors.grey,
+                      color: isAvailable ? t.textDim : Colors.grey,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       'Min order: ₹${coupon['minOrder']} • Max discount: ₹${coupon['maxDiscount']}',
                       style: TextStyle(
                         fontSize: 11,
-                        color: isAvailable ? _textFade : Colors.grey,
+                        color: isAvailable ? t.textDim : Colors.grey,
                         fontWeight: FontWeight.w600,
                       ),
                     ),

@@ -9,6 +9,7 @@
 //    printing: ^5.12.0
 // ═══════════════════════════════════════════════════════════
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,10 +25,6 @@ const _hGold = Color(0xFFF5C518);
 const _hGreen = Color(0xFF10B981);
 const _hRed = Color(0xFFEF4444);
 const _hAmber = Color(0xFFF59E0B);
-const _hSurf = Color(0xFFF0F4FF);
-const _hDark = Color(0xFF0A1628);
-const _hMid = Color(0xFF475569);
-const _hFade = Color(0xFF94A3B8);
 
 Color _hAccent(String n) {
   switch (n) {
@@ -127,21 +124,34 @@ class OrderHistoryPage extends StatefulWidget {
 
 class _OrderHistoryPageState extends State<OrderHistoryPage> {
   String _filter = "All";
-  final _filters = ["All", "Pending", "Confirmed", "Processing", "Completed", "Cancelled"];
+  final _filters = ["All", "Pending", "Processing", "Completed", "Cancelled"];
 
   List<Map<String, dynamic>> _filterOrders(List<Map<String, dynamic>> all) {
-    if (_filter == "All") return all;
-    return all.where((o) {
+    // Always exclude 'failed' from main list — shown separately
+    final nonFailed = all.where((o) => ((o['status'] ?? '') as String).toLowerCase() != 'failed').toList();
+    if (_filter == "All") return nonFailed;
+    return nonFailed.where((o) {
       final status = ((o['status'] ?? '') as String).toLowerCase();
       final filterLower = _filter.toLowerCase();
+      if (filterLower == 'processing') {
+        return ['processing', 'assigned', 'pickup', 'confirmed', 'accepted', 'reached', 'picked', 'out_for_delivery'].contains(status);
+      }
+      if (filterLower == 'completed') {
+        return ['completed', 'delivered'].contains(status);
+      }
       return status == filterLower;
     }).toList();
   }
 
+  List<Map<String, dynamic>> _getFailedOrders(List<Map<String, dynamic>> all) {
+    return all.where((o) => ((o['status'] ?? '') as String).toLowerCase() == 'failed').toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _hSurf,
+      backgroundColor: t.bg,
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: OrderService.ordersStream(),
         initialData: widget.initialOrders ?? [],
@@ -196,7 +206,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                     ],
                   ),
                   background: Container(
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                         gradient: LinearGradient(
                             colors: [_hNavy, _hNMid],
                             begin: Alignment.topLeft,
@@ -226,6 +236,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: _filters.map((f) {
+                        final t = AppColors.of(context);
                         final isSel = _filter == f;
                         final count = f == "All"
                             ? allOrders.length
@@ -239,7 +250,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 9),
                               decoration: BoxDecoration(
-                                  color: isSel ? _hNavy : Colors.white,
+                                  color: isSel ? AppColors.navy : t.card,
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
                                       color: isSel
@@ -268,23 +279,20 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                                         style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w700,
-                                            color:
-                                                isSel ? Colors.white : _hMid)),
+                                            color: isSel ? Colors.white : t.textMid)),
                                     const SizedBox(width: 6),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 7, vertical: 2),
                                       decoration: BoxDecoration(
-                                          color: isSel
-                                              ? _hGold.withValues(alpha: 0.25)
-                                              : _hSurf,
+                                          color: isSel ? AppColors.gold.withValues(alpha: 0.25) : t.surface,
                                           borderRadius:
                                               BorderRadius.circular(10)),
                                       child: Text("$count",
                                           style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w800,
-                                              color: isSel ? _hGold : _hFade)),
+                                              color: isSel ? AppColors.gold : t.textDim)),
                                     ),
                                   ]),
                             ),
@@ -297,10 +305,10 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               ),
 
               // ── Orders list / empty state ──────────────────
-              shown.isEmpty
+              shown.isEmpty && _getFailedOrders(allOrders).isEmpty
                   ? SliverFillRemaining(child: _emptyState(_filter))
                   : SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) => _orderCard(ctx, shown[i]),
@@ -308,6 +316,38 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                         ),
                       ),
                     ),
+
+              // ── Failed orders section ──────────────────────
+              if (_getFailedOrders(allOrders).isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  sliver: SliverToBoxAdapter(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: t.isDark ? const Color(0xFF2A1515) : Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Failed Orders (${_getFailedOrders(allOrders).length})',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.red.shade700)),
+                      ]),
+                    ),
+                  ),
+                ),
+              if (_getFailedOrders(allOrders).isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) => _failedOrderCard(ctx, _getFailedOrders(allOrders)[i]),
+                      childCount: _getFailedOrders(allOrders).length,
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -317,13 +357,15 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
 
   // ── Order card ─────────────────────────────────────────────
   Widget _orderCard(BuildContext context, Map<String, dynamic> order) {
+    final t = AppColors.of(context);
     final services = (order['services'] as List?)
             ?.map((e) => Map<String, dynamic>.from(e as Map))
             .toList() ??
         [];
-    final total = (order['total'] as num?)?.toDouble() ?? 0.0;
+    final total = ((order['total'] ?? order['totalAmount'] ?? order['grandTotal'] ?? 0) as num).toDouble();
     final status = (order['status'] as String?) ?? 'Confirmed';
-    final orderId = (order['orderId'] as String?) ?? '';
+    final orderId = (order['orderId'] ?? order['id'] ?? '') as String;
+    final displayId = orderId.length >= 8 ? orderId.substring(0, 8).toUpperCase() : orderId.toUpperCase();
 
     int totalItems = 0;
     for (final svc in services) {
@@ -333,10 +375,12 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
       }
     }
 
-    return Container(
+    return GestureDetector(
+      onTap: () => _downloadBill(context, order),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-          color: Colors.white,
+          color: t.card,
           borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
@@ -349,7 +393,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-              color: _hNavy.withValues(alpha: 0.04),
+              color: t.isDark ? Colors.white.withValues(alpha: 0.04) : AppColors.navy.withValues(alpha: 0.04),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(22))),
           child: Row(children: [
@@ -365,15 +409,15 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                  Text("#$orderId",
-                      style: const TextStyle(
+                  Text("#$displayId",
+                      style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
-                          color: _hDark)),
+                          color: t.textHi)),
                   const SizedBox(height: 2),
                   Text(
                       "${order['orderDate'] ?? ''}  ·  ${order['orderTime'] ?? ''}",
-                      style: const TextStyle(fontSize: 11, color: _hFade)),
+                      style: TextStyle(fontSize: 11, color: t.textDim)),
                 ])),
             _statusBadge(status),
           ]),
@@ -385,6 +429,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // ── Service rows ─────────────────────────────────
             ...services.map((svc) {
+              final t = AppColors.of(context);
               final sName = (svc['serviceName'] as String?) ?? '';
               final items = (svc['items'] as List?) ?? [];
               final accent = _hAccent(sName);
@@ -407,15 +452,15 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                         Text(sName,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
-                                color: _hDark)),
+                                color: t.textHi)),
                         Text(
                             "${items.length} item${items.length > 1 ? 's' : ''}  ·  "
                             "$totalItems total",
                             style:
-                                const TextStyle(fontSize: 11, color: _hFade)),
+                                TextStyle(fontSize: 11, color: t.textDim)),
                       ])),
                   Text("₹${sTotal.toStringAsFixed(0)}",
                       style: TextStyle(
@@ -426,38 +471,38 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               );
             }),
 
-            Container(height: 1, color: const Color(0xFFF1F5F9)),
+            Container(height: 1, color: t.divider),
             const SizedBox(height: 10),
 
             // ── Schedule + Payment ───────────────────────────
             Row(children: [
-              const Icon(Icons.upload_rounded, size: 13, color: _hFade),
+              Icon(Icons.upload_rounded, size: 13, color: t.textDim),
               const SizedBox(width: 4),
               Expanded(
                   child: Text(
                       "Pickup: ${order['pickupDate'] ?? ''}  ${order['pickupTime'] ?? ''}",
-                      style: const TextStyle(fontSize: 11, color: _hFade))),
+                      style: TextStyle(fontSize: 11, color: t.textDim))),
             ]),
             const SizedBox(height: 4),
             Row(children: [
-              const Icon(Icons.download_rounded, size: 13, color: _hFade),
+              Icon(Icons.download_rounded, size: 13, color: t.textDim),
               const SizedBox(width: 4),
               Expanded(
                   child: Text(
                       "Delivery: ${order['deliveryDate'] ?? ''}  ${order['deliveryTime'] ?? ''}",
-                      style: const TextStyle(fontSize: 11, color: _hFade))),
+                      style: TextStyle(fontSize: 11, color: t.textDim))),
             ]),
             const SizedBox(height: 4),
             Row(children: [
-              const Icon(Icons.payment_rounded, size: 13, color: _hFade),
+              Icon(Icons.payment_rounded, size: 13, color: t.textDim),
               const SizedBox(width: 4),
               Text(order['paymentMethod'] ?? 'N/A',
-                  style: const TextStyle(fontSize: 11, color: _hFade)),
+                  style: TextStyle(fontSize: 11, color: t.textDim)),
               const Spacer(),
-              const Icon(Icons.location_on_rounded, size: 13, color: _hFade),
+              Icon(Icons.location_on_rounded, size: 13, color: t.textDim),
               const SizedBox(width: 4),
               Text(order['addressLabel'] ?? '',
-                  style: const TextStyle(fontSize: 11, color: _hFade)),
+                  style: TextStyle(fontSize: 11, color: t.textDim)),
             ]),
           ]),
         ),
@@ -468,14 +513,14 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
           child: Column(children: [
             Row(children: [
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text("Total Paid",
-                    style: TextStyle(fontSize: 11, color: _hFade)),
+                Text("Total Paid",
+                    style: TextStyle(fontSize: 11, color: t.textDim)),
                 const SizedBox(height: 2),
                 Text("₹${total.toStringAsFixed(2)}",
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
-                        color: _hDark)),
+                        color: t.textHi)),
               ]),
               const Spacer(),
               GestureDetector(
@@ -507,240 +552,68 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                 ),
               ),
             ]),
-            if (_isCancellable(status)) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _cancelOrder(context, order),
-                  icon: const Icon(Icons.cancel_outlined, size: 16),
-                  label: const Text("Cancel Order",
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300, width: 1.5),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-            ],
+
           ]),
         ),
       ]),
+    ),  // closes GestureDetector
     );
   }
 
-  // ── Cancel helpers ──────────────────────────────────────────
-  bool _isCancellable(String status) {
-    final s = status.toLowerCase();
-    return s == 'pending' || s == 'confirmed' || s == 'assigned';
-  }
+  // ── Failed order card ─────────────────────────────────────────
+  Widget _failedOrderCard(BuildContext context, Map<String, dynamic> order) {
+    final t = AppColors.of(context);
+    final orderId = (order['id'] ?? order['orderId'] ?? '') as String;
+    final shortId = orderId.length >= 8 ? orderId.substring(0, 8).toUpperCase() : orderId.toUpperCase();
+    final total = ((order['totalAmount'] ?? order['total'] ?? 0) as num).toDouble();
+    final date = order['pickupDate'] ?? order['orderDate'] ?? '';
+    final reason = order['failureReason'] ?? order['cancellationReason'] ?? 'Payment failed';
 
-  Future<void> _cancelOrder(BuildContext context, Map<String, dynamic> order) async {
-    final status = ((order['status'] ?? '') as String).toLowerCase();
-    final orderId = order['id'] as String? ?? order['orderId'] as String? ?? '';
-
-    if (orderId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to find order ID'), backgroundColor: Colors.red),
-      );
-      return;
-    }
-
-    // Show cancellation reason dialog
-    final reasons = [
-      'Changed my mind',
-      'Found better price elsewhere',
-      'Ordered by mistake',
-      'Delivery taking too long',
-      'Need to modify order',
-      'Other',
-    ];
-    String? selectedReason;
-    final customCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.cancel_outlined, color: Colors.red.shade700, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Cancel Order', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Color(0xFF0A1628))),
-                      Text('This action cannot be undone', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                    ],
-                  ),
-                ]),
-                const SizedBox(height: 20),
-                const Text('Reason for cancellation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF0A1628))),
-                const SizedBox(height: 10),
-                ...reasons.map((r) {
-                  final sel = selectedReason == r;
-                  return GestureDetector(
-                    onTap: () => setS(() => selectedReason = r),
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      decoration: BoxDecoration(
-                        color: sel ? const Color(0xFF0A1628).withValues(alpha: 0.05) : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: sel ? const Color(0xFF0A1628) : const Color(0xFFE2E8F0),
-                          width: sel ? 1.5 : 1,
-                        ),
-                      ),
-                      child: Row(children: [
-                        Icon(sel ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                          size: 18, color: sel ? const Color(0xFF0A1628) : const Color(0xFF94A3B8)),
-                        const SizedBox(width: 10),
-                        Text(r, style: TextStyle(fontSize: 13, fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                          color: sel ? const Color(0xFF0A1628) : const Color(0xFF475569))),
-                      ]),
-                    ),
-                  );
-                }),
-                if (selectedReason == 'Other') ...[
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: customCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Please specify...',
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFF0A1628), width: 1.5),
-                      ),
-                    ),
-                    maxLines: 2,
-                  ),
-                ],
-                const SizedBox(height: 16),
-                // Refund note
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.orange.shade200),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.info_outline, color: Colors.orange.shade700, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(
-                      status == 'assigned'
-                        ? 'You will receive a 90% refund for this order.'
-                        : 'You will receive a 100% refund for this order.',
-                      style: TextStyle(fontSize: 12, color: Colors.orange.shade900, fontWeight: FontWeight.w600),
-                    )),
-                  ]),
-                ),
-                const SizedBox(height: 20),
-                Row(children: [
-                  Expanded(child: TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Keep Order', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(child: ElevatedButton(
-                    onPressed: selectedReason == null ? null : () => Navigator.pop(ctx, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade700,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.red.shade100,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                    ),
-                    child: const Text('Cancel Order', style: TextStyle(fontWeight: FontWeight.w800)),
-                  )),
-                ]),
-              ],
-            ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red.shade200, width: 1.5),
+        boxShadow: [BoxShadow(color: Colors.red.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 3))],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
+            child: Icon(Icons.error_rounded, color: Colors.red.shade600, size: 22),
           ),
-        ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('#$shortId', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF0A1628))),
+              const SizedBox(height: 2),
+              Text(reason, style: TextStyle(fontSize: 11, color: Colors.red.shade700, fontWeight: FontWeight.w600)),
+              if (date.isNotEmpty)
+                Text(date, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+            ]),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text('₹${total.toStringAsFixed(0)}',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF0A1628))),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(8)),
+              child: Text('FAILED',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.red.shade700, letterSpacing: 0.5)),
+            ),
+          ]),
+        ],
       ),
     );
-
-    if (confirmed != true || !context.mounted) return;
-
-    final reason = selectedReason == 'Other'
-        ? (customCtrl.text.trim().isEmpty ? 'Other' : customCtrl.text.trim())
-        : selectedReason!;
-
-    try {
-      // Show loading
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(children: [
-            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-            SizedBox(width: 12),
-            Text('Cancelling order...'),
-          ]),
-          backgroundColor: Color(0xFF0A1628),
-          duration: Duration(seconds: 3),
-        ),
-      );
-
-      final db = FirebaseFirestore.instance;
-      final double refundPct = status == 'assigned' ? 0.9 : 1.0;
-      final double totalAmt = (order['totalAmount'] as num? ?? order['total'] as num? ?? 0).toDouble();
-
-      await db.collection('orders').doc(orderId).update({
-        'status': 'cancelled',
-        'cancelledAt': FieldValue.serverTimestamp(),
-        'cancellationReason': reason,
-        'cancelledBy': 'user',
-        'refundAmount': totalAmt * refundPct,
-        'refundPercentage': refundPct * 100,
-        'refundStatus': 'pending',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-              const SizedBox(width: 10),
-              Text('Order cancelled. Refund: ₹${(totalAmt * refundPct).toStringAsFixed(2)}'),
-            ]),
-            backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to cancel: $e'), backgroundColor: Colors.red.shade700),
-        );
-      }
-    }
   }
 
   // ── Status badge ───────────────────────────────────────────
   Widget _statusBadge(String status) {
+    final t = AppColors.of(context);
     final Color bg, fg;
     final IconData icon;
 
@@ -771,8 +644,8 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
         icon = Icons.error_rounded;
         break;
       default:
-        bg = _hFade.withValues(alpha: 0.1);
-        fg = _hFade;
+        bg = t.textDim.withValues(alpha: 0.1);
+        fg = t.textDim;
         icon = Icons.info_outline_rounded;
     }
 
@@ -792,6 +665,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
 
   // ── Empty state ────────────────────────────────────────────
   Widget _emptyState(String filter) {
+    final t = AppColors.of(context);
     final isAll = filter == "All";
     return Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -803,20 +677,21 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               const Icon(Icons.receipt_long_outlined, color: _hBlue, size: 52)),
       const SizedBox(height: 18),
       Text(isAll ? "No orders yet" : "No $filter orders",
-          style: const TextStyle(
-              fontSize: 20, fontWeight: FontWeight.w900, color: _hDark)),
+          style: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.w900, color: t.textHi)),
       const SizedBox(height: 6),
       Text(
           isAll
               ? "Your orders will appear here after booking."
               : "No orders found with status \"$filter\".",
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 14, color: _hFade)),
+          style: TextStyle(fontSize: 14, color: t.textDim)),
     ]));
   }
 
   // ── Loading ────────────────────────────────────────────────
   Widget _loadingState() {
+    final t = AppColors.of(context);
     return Center(
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         SizedBox(
@@ -824,15 +699,16 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
             height: 48,
             child: CircularProgressIndicator(color: _hNavy, strokeWidth: 3)),
         const SizedBox(height: 16),
-        const Text("Loading your orders...",
+        Text("Loading your orders...",
             style: TextStyle(
-                fontSize: 14, color: _hFade, fontWeight: FontWeight.w600)),
+                fontSize: 14, color: t.textDim, fontWeight: FontWeight.w600)),
       ]),
     );
   }
 
   // ── Error ──────────────────────────────────────────────────
   Widget _errorState(String msg) {
+    final t = AppColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -844,13 +720,13 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               child: const Icon(Icons.error_outline_rounded,
                   color: _hRed, size: 48)),
           const SizedBox(height: 16),
-          const Text("Could not load orders",
+          Text("Could not load orders",
               style: TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w900, color: _hDark)),
+                  fontSize: 18, fontWeight: FontWeight.w900, color: t.textHi)),
           const SizedBox(height: 6),
           Text(msg,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: _hFade)),
+              style: TextStyle(fontSize: 12, color: t.textDim)),
           const SizedBox(height: 20),
           ElevatedButton(
               onPressed: () => setState(() {}),
@@ -896,10 +772,25 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
     final services = (order['services'] as List? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
-    final subtotal = (order['subtotal'] as num? ?? 0).toDouble();
+
+    // Compute subtotal from cart items directly — covers Cash on Delivery where
+    // payment fields may be 0 or missing
+    double computedSubtotal = 0;
+    for (final svc in services) {
+      final items = (svc['items'] as List?) ?? [];
+      for (final item in items) {
+        final m = item as Map;
+        computedSubtotal += ((m['qty'] as int? ?? 0) * (m['price'] as num? ?? 0));
+      }
+    }
+
+    // Use stored values if they are non-zero, else fall back to computed
+    final storedSubtotal = (order['subtotal'] as num? ?? 0).toDouble();
+    final subtotal = storedSubtotal > 0 ? storedSubtotal : computedSubtotal;
     final delivery = (order['deliveryFee'] as num? ?? 0).toDouble();
     final gst = (order['gst'] as num? ?? 0).toDouble();
-    final total = (order['total'] as num? ?? 0).toDouble();
+    final storedTotal = (order['total'] ?? order['totalAmount'] ?? order['grandTotal'] ?? 0 as num).toDouble();
+    final total = storedTotal > 0 ? storedTotal : (subtotal + delivery + gst);
 
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,

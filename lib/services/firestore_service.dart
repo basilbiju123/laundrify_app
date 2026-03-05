@@ -239,6 +239,24 @@ class FirestoreService {
         .snapshots();
   }
 
+  // Future-based version — use instead of stream to avoid dual-stream
+  // assertion error on web when writing to the same user doc
+  Future<List<Map<String, dynamic>>> getLoyaltyHistoryFuture() async {
+    if (_uid == null) return [];
+    try {
+      final snap = await _db
+          .collection('users')
+          .doc(_uid)
+          .collection('loyalty_history')
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+      return snap.docs.map((d) => d.data()).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<Map<String, dynamic>> redeemPoints(int points) async {
     if (_uid == null) return {'success': false, 'error': 'Not logged in'};
     try {
