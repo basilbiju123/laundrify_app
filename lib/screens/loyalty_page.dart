@@ -126,12 +126,12 @@ class _LoyaltyPageState extends State<LoyaltyPage>
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: Row(children: [
-                const Expanded(
+                Expanded(
                     child: Text('Rewards & Loyalty',
                         style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w900,
-                            color: Colors.white))),
+                            color: t.textHi))),
               ]),
             ),
 
@@ -479,8 +479,7 @@ class _LoyaltyPageState extends State<LoyaltyPage>
                                       child: Text(
                                           'No transactions yet. Start ordering to earn points!',
                                           style: TextStyle(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.4),
+                                              color: t.textDim,
                                               fontSize: 13),
                                           textAlign: TextAlign.center)),
                                 )
@@ -532,25 +531,20 @@ class _LoyaltyPageState extends State<LoyaltyPage>
                                                             .start,
                                                     children: [
                                                   Text(d['description'] ?? '',
-                                                      style: const TextStyle(
+                                                      style: TextStyle(
                                                           fontSize: 13,
                                                           fontWeight:
                                                               FontWeight.w700,
-                                                          color: Colors.white)),
+                                                          color: t.textHi)),
                                                   if (ts != null)
                                                     Text(
-                                                        '\${ts.day}/\${ts.month}/\${ts.year}',
+                                                        '${ts.day}/${ts.month}/${ts.year}',
                                                         style: TextStyle(
                                                             fontSize: 11,
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.4))),
+                                                            color: t.textDim)),
                                                 ])),
                                             Text(
-                                                '\${isEarn ? '
-                                                ' : '
-                                                '}\$pts pts',
+                                                '${isEarn ? '+' : '-'}$pts pts',
                                                 style: TextStyle(
                                                     fontSize: 15,
                                                     fontWeight: FontWeight.w900,
@@ -579,26 +573,31 @@ class _LoyaltyPageState extends State<LoyaltyPage>
     );
   }
 
-  Widget _sectionHeader(String title) => Row(children: [
-        Text(title,
-            style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: Colors.white)),
-        const Spacer(),
-      ]);
+  Widget _sectionHeader(String title) {
+    final t = AppColors.of(context);
+    return Row(children: [
+      Text(title,
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: t.textHi)),
+      const Spacer(),
+    ]);
+  }
 
-  Widget _earnRow(String emoji, String title, String pts) => Padding(
+  Widget _earnRow(String emoji, String title, String pts) {
+    final t = AppColors.of(context);
+    return Padding(
         padding: const EdgeInsets.all(16),
         child: Row(children: [
           Text(emoji, style: const TextStyle(fontSize: 22)),
           const SizedBox(width: 12),
           Expanded(
               child: Text(title,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: Colors.white))),
+                      color: t.textHi))),
           Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
@@ -611,6 +610,7 @@ class _LoyaltyPageState extends State<LoyaltyPage>
                       color: _gold))),
         ]),
       );
+  }
 
   Widget _divider() {
     final t = AppColors.of(context);

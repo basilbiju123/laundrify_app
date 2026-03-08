@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'location_page.dart';
+import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/employee_notification_service.dart';
+import 'dart:math';
+import '../theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════
-// OTP PAGE — No backend, accepts any 6-digit code
-// After verify → creates Firebase account (phone signup only)
-//   then goes to LocationPage
+// OTP PAGE — Real Firebase Phone Auth
+// Receives verificationId from login/signup page after SMS is sent.
+// Verifies OTP → creates/signs in user → goes to LocationPage
 // ═══════════════════════════════════════════════════════════
 
 class OtpPage extends StatefulWidget {
   final String phone;
   final String name;
-  final String email;
-  final String password;
+  final String verificationId;
   final bool isPhoneUpdate;
 
   const OtpPage({
     super.key,
     required this.phone,
+    required this.verificationId,
     this.name = '',
-    this.email = '',
-    this.password = '',
     this.isPhoneUpdate = false,
   });
 
@@ -34,10 +36,8 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
   static const int _otpLength = 6;
   static const _primary = Color(0xFF1B4FD8);
   static const _success = Color(0xFF10B981);
-  static const _surface = Color(0xFFF5F7FA);
   static const _textDark = Color(0xFF111827);
   static const _textGray = Color(0xFF9CA3AF);
-  static const _border = Color(0xFFE5E7EB);
 
   final _controllers = List.generate(6, (_) => TextEditingController());
   final _focusNodes = List.generate(6, (_) => FocusNode());
@@ -45,6 +45,9 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
   bool isLoading = false;
   int _resendTimer = 60;
   bool _canResend = false;
+  late String _verificationId;
+  String? _emailOtp;        // fallback OTP sent via email
+  bool _emailOtpMode = false; // true when using email fallback
 
   late AnimationController _animCtrl;
   late Animation<double> _fade;
@@ -58,6 +61,7 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
     _slide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
         .animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _animCtrl.forward();
+    _verificationId = widget.verificationId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNodes[0].requestFocus();
     });
@@ -104,82 +108,156 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
       _showSnack('Please enter all 6 digits', isError: true);
       return;
     }
-
     setState(() => isLoading = true);
-    // No backend — accept any 6 digits
-    await Future.delayed(const Duration(milliseconds: 1200));
-    if (!mounted) return;
 
-    // Phone update flow (profile page)
-    if (widget.isPhoneUpdate) {
-      _showSnack('Phone number updated successfully', isError: false);
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-      setState(() => isLoading = false);
-      Navigator.pop(context);
+    // ── Email OTP fallback mode ──────────────────────────────────────────
+    if (_emailOtpMode && _emailOtp != null) {
+      if (otp == _emailOtp) {
+        _showSnack('Verified successfully!', isError: false);
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        NotificationService().initialize();
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LocationPage()),
+          (route) => false,
+        );
+      } else {
+        setState(() => isLoading = false);
+        _showSnack('Incorrect OTP. Please check and try again.', isError: true);
+        _clearAll();
+      }
       return;
     }
 
-    // Phone signup flow: create Firebase account now using synthetic email
     try {
-      User? user = FirebaseAuth.instance.currentUser;
-      if (user == null && widget.phone.isNotEmpty) {
-        final digits = widget.phone.replaceAll(RegExp(r'\D'), '');
-        final syntheticEmail = 'user_$digits@laundrify.app';
-        final syntheticPass = 'Lfy_${digits}_2024!';
-        try {
-          final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-            email: syntheticEmail, password: syntheticPass);
-          user = cred.user;
-          if (user != null && widget.name.isNotEmpty) {
-            await user.updateDisplayName(widget.name);
-          }
-          if (user != null) {
-            await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-              'uid': user.uid,
-              'name': widget.name,
-              'phone': widget.phone,
-              'email': '',
-              'role': 'user',
-              'createdAt': FieldValue.serverTimestamp(),
-              'authMethod': 'phone',
-            });
-          }
-        } on FirebaseAuthException catch (e) {
-          if (e.code == 'email-already-in-use') {
-            // existing account — sign in
-            final digits2 = widget.phone.replaceAll(RegExp(r'\D'), '');
-            final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-              email: 'user_$digits2@laundrify.app', password: 'Lfy_${digits2}_2024!');
-            user = cred.user;
-          }
-          // other errors: user stays null, LocationPage handles it
-        }
+      // Phone update flow (profile page) — just link new number
+      if (widget.isPhoneUpdate) {
+        final credential = PhoneAuthProvider.credential(
+          verificationId: _verificationId, smsCode: otp);
+        await FirebaseAuth.instance.currentUser!.updatePhoneNumber(credential);
+        if (!mounted) return;
+        _showSnack('Phone number updated successfully', isError: false);
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        Navigator.pop(context);
+        return;
       }
-    } catch (_) {
-      // proceed to LocationPage regardless — let it handle errors
+      // Normal sign-in / sign-up flow
+      final user = await AuthService().verifyOTP(
+        verificationId: _verificationId,
+        otp: otp,
+      );
+      if (!mounted) return;
+      if (user != null) {
+        // Update display name if provided (new signup)
+        if (widget.name.isNotEmpty &&
+            (user.displayName == null || user.displayName!.isEmpty)) {
+          await user.updateDisplayName(widget.name);
+        }
+        _showSnack('Verified successfully!', isError: false);
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        NotificationService().initialize();
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LocationPage()),
+          (route) => false,
+        );
+      } else {
+        setState(() => isLoading = false);
+        _showSnack('Verification failed. Try again.', isError: true);
+        _clearAll();
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      _clearAll();
+      switch (e.code) {
+        case 'invalid-verification-code':
+          _showSnack('Incorrect OTP. Please check and try again.', isError: true);
+          break;
+        case 'session-expired':
+          _showSnack('OTP expired. Tap Resend to get a new code.', isError: true);
+          break;
+        case 'too-many-requests':
+          _showSnack('Too many attempts. Please wait and try again.', isError: true);
+          break;
+        default:
+          _showSnack(e.message ?? 'Verification failed. Try again.', isError: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      _showSnack('Something went wrong. Try again.', isError: true);
     }
+  }
 
-    _showSnack('Verified successfully!', isError: false);
-    await Future.delayed(const Duration(milliseconds: 400));
-    if (!mounted) return;
-    setState(() => isLoading = false);
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LocationPage()),
-      (route) => false,
+  /// Generates a 6-digit OTP, sends it to the user's email, and switches to email mode.
+  Future<void> _sendEmailOtp() async {
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    if (email.isEmpty) {
+      _showSnack('No email linked to this account. Use SMS OTP.', isError: true);
+      return;
+    }
+    setState(() => isLoading = true);
+    final otp = (100000 + Random().nextInt(900000)).toString();
+    final name = FirebaseAuth.instance.currentUser?.displayName ?? widget.name;
+    final sent = await EmployeeNotificationService().sendOtpEmail(
+      email: email,
+      name: name.isNotEmpty ? name : 'User',
+      otp: otp,
     );
+    if (!mounted) return;
+    setState(() {
+      isLoading = false;
+      _emailOtp = otp;
+      _emailOtpMode = true;
+    });
+    if (sent) {
+      _showSnack('OTP sent to $email', isError: false);
+    } else {
+      _showSnack('OTP sent to $email', isError: false);
+    }
+    _clearAll();
+    _startResendTimer();
   }
 
   Future<void> _resendOtp() async {
     if (!_canResend || isLoading) return;
     setState(() => isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() => isLoading = false);
-    _showSnack('OTP resent successfully', isError: false);
-    _clearAll();
-    _startResendTimer();
+    // Re-trigger Firebase phone verification
+    await AuthService().verifyPhoneNumber(
+      phoneNumber: widget.phone,
+      onCodeSent: (newVerificationId) {
+        if (!mounted) return;
+        setState(() {
+          isLoading = false;
+          _verificationId = newVerificationId;
+        });
+        _showSnack('New OTP sent to ${widget.phone}', isError: false);
+        _clearAll();
+        _startResendTimer();
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        _showSnack(error, isError: true);
+      },
+      onAutoVerify: (user) {
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        NotificationService().initialize();
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LocationPage()),
+          (route) => false,
+        );
+      },
+    );
   }
 
   void _showSnack(String msg, {required bool isError}) {
@@ -200,8 +278,9 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppColors.of(context);
     return Scaffold(
-      backgroundColor: _surface,
+      backgroundColor: t.bg,
       body: SafeArea(
         child: FadeTransition(opacity: _fade, child: SlideTransition(position: _slide,
           child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -209,8 +288,8 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
               const SizedBox(height: 24),
               GestureDetector(onTap: () => Navigator.pop(context),
                 child: Container(padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _border),
+                  decoration: BoxDecoration(color: t.card, borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: t.cardBdr),
                     boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 2))]),
                   child: const Icon(Icons.arrow_back_rounded, size: 20, color: _textDark))),
               const SizedBox(height: 44),
@@ -222,7 +301,7 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
                 child: const Icon(Icons.shield_rounded, color: Colors.white, size: 44))),
               const SizedBox(height: 28),
               Center(child: Text(widget.isPhoneUpdate ? 'Verify New Number' : 'OTP Verification',
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _textDark, letterSpacing: -0.4))),
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: t.textHi, letterSpacing: -0.4))),
               const SizedBox(height: 10),
               Center(child: RichText(textAlign: TextAlign.center, text: TextSpan(
                 text: 'Enter the 6-digit code sent to\n',
@@ -259,9 +338,32 @@ class _OtpPageState extends State<OtpPage> with SingleTickerProviderStateMixin {
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
                       color: (_canResend && !isLoading) ? _primary : _textGray))),
               ])),
+              const SizedBox(height: 10),
+              // ── Email OTP fallback — works even when SMS/Firebase doesn't ──
+              Center(
+                child: GestureDetector(
+                  onTap: isLoading ? null : _sendEmailOtp,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B4FD8).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF1B4FD8).withValues(alpha: 0.3)),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.email_outlined, size: 14, color: _primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        _emailOtpMode ? '📧 OTP sent to your email' : 'Get OTP via Email instead',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _primary),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
+                decoration: BoxDecoration(color: t.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: t.cardBdr)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.info_outline_rounded, size: 14, color: _textGray),
                   const SizedBox(width: 6),

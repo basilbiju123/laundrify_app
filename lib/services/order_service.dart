@@ -310,10 +310,12 @@ class OrderService {
   /// Get delivery person details
   Future<Map<String, dynamic>?> getDeliveryPersonDetails(String deliveryPersonId) async {
     try {
-      final doc = await _db.collection('users').doc(deliveryPersonId).get();
-      if (doc.exists) {
-        return doc.data();
-      }
+      // Delivery agents are in /delivery_agents, not /users
+      final doc = await _db.collection('delivery_agents').doc(deliveryPersonId).get();
+      if (doc.exists) return doc.data();
+      // Fallback: check /users in case of legacy data
+      final fallback = await _db.collection('users').doc(deliveryPersonId).get();
+      if (fallback.exists) return fallback.data();
       return null;
     } catch (e) {
       debugPrint('Error getting delivery person details: $e');

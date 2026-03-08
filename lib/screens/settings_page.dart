@@ -1,6 +1,7 @@
 import 'auth_options_page.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/notification_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/panel_theme_service.dart';
@@ -17,13 +18,10 @@ class _SettingsPageState extends State<SettingsPage> {
   static const _navy = Color(0xFF080F1E);
   static const _gold = Color(0xFFF5C518);
 
-  bool get _darkMode {
-    try {
-      return PanelThemeScope.of(context).isDark;
-    } catch (_) {
-      return Theme.of(context).brightness == Brightness.dark;
-    }
-  }
+  // Access user panel theme service directly via the static cache
+  PanelThemeService get _userTheme => PanelThemeService.forKey('user');
+
+  bool get _darkMode => _userTheme.isDark;
   bool _orderNotifications = true;
   bool _promotionalNotifications = true;
   bool _smsAlerts = false;
@@ -48,6 +46,14 @@ class _SettingsPageState extends State<SettingsPage> {
     await prefs.setBool('orderNotifications', _orderNotifications);
     await prefs.setBool('promoNotifications', _promotionalNotifications);
     await prefs.setBool('smsAlerts', _smsAlerts);
+    // Sync push notification opt-in/out with OneSignal
+    try {
+      if (_orderNotifications) {
+        await NotificationService.optInToNotifications();
+      } else {
+        await NotificationService.optOutOfNotifications();
+      }
+    } catch (_) {} // Non-fatal
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -88,9 +94,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.dark_mode_rounded,
                 _darkMode,
                 (v) async {
-                  try {
-                    await PanelThemeScope.of(context).setDark(v);
-                  } catch (_) {}
+                  await _userTheme.setDark(v);
                   if (mounted) setState(() {});
                 },
               ),
@@ -346,30 +350,120 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (confirmed == true && mounted) {
-      try {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          // Delete all user subcollections data
-          final batch = FirebaseFirestore.instance.batch();
-          // Delete user document
-          batch.delete(
-              FirebaseFirestore.instance.collection('users').doc(user.uid));
-          await batch.commit();
-          // Delete Firebase Auth account
-          await user.delete();
-        }
+      await _performDeleteAccount();
+    }
+  }
+
+  Future<void> _performDeleteAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Show loading
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // Delete Firestore data first
+      final db = FirebaseFirestore.instance;
+      final uid = user.uid;
+
+      // Delete subcollections
+      final subcolls = ['notifications', 'cart', 'addresses', 'orders'];
+      for (final sub in subcolls) {
+        final snap = await db.collection('users').doc(uid).collection(sub).get();
+        for (final doc in snap.docs) { await doc.reference.delete(); }
+      }
+      // Delete user document
+      await db.collection('users').doc(uid).delete();
+
+      // Delete Firebase Auth account
+      await user.delete();
+
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+          (route) => false,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) Navigator.of(context).pop(); // close loading
+      if (e.code == 'requires-recent-login' && mounted) {
+        // Need to reauthenticate first
+        await _reauthAndDelete(user);
+      } else {
         if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
-            (route) => false,
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${e.message ?? 'Failed to delete account'}'),
+              backgroundColor: Colors.red.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
           );
         }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete account. Please try again.'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _reauthAndDelete(User user) async {
+    final passwordCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Confirm Identity', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('For security, please enter your password to delete your account.'),
+          const SizedBox(height: 16),
+          TextField(
+            controller: passwordCtrl,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        final cred = EmailAuthProvider.credential(
+          email: user.email!,
+          password: passwordCtrl.text.trim(),
+        );
+        await user.reauthenticateWithCredential(cred);
+        await _performDeleteAccount();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                  'Please sign out and sign back in before deleting your account.'),
+              content: const Text('Incorrect password. Account not deleted.'),
               backgroundColor: Colors.red.shade700,
               behavior: SnackBarBehavior.floating,
             ),
@@ -377,5 +471,6 @@ class _SettingsPageState extends State<SettingsPage> {
         }
       }
     }
+    passwordCtrl.dispose();
   }
 }

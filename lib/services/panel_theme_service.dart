@@ -23,7 +23,19 @@ class PanelThemeService extends ChangeNotifier {
   bool _isDark = false;
   bool get isDark => _isDark;
 
+  // Cache shared with PanelThemeScope so the same instance is used everywhere
+  static final Map<String, PanelThemeService> _cache = {};
+
+  /// Get (or create) the shared instance for a given panel key.
+  /// Use this when you need the service outside of a PanelThemeScope subtree.
+  static PanelThemeService forKey(String key) =>
+      _cache.putIfAbsent(key, () => PanelThemeService._(key));
+
   PanelThemeService(this.panelKey) {
+    _load();
+  }
+
+  PanelThemeService._(this.panelKey) {
     _load();
   }
 
@@ -94,14 +106,10 @@ class PanelThemeScope extends StatefulWidget {
 class _PanelThemeScopeState extends State<PanelThemeScope> {
   late PanelThemeService _service;
 
-  // Cache per panelKey so the service survives widget rebuilds
-  static final Map<String, PanelThemeService> _cache = {};
-
   @override
   void initState() {
     super.initState();
-    _service = _cache.putIfAbsent(
-        widget.panelKey, () => PanelThemeService(widget.panelKey));
+    _service = PanelThemeService.forKey(widget.panelKey);
     _service.addListener(_onThemeChanged);
   }
 

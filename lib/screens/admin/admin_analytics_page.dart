@@ -207,10 +207,10 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   Future<void> _loadEmployees() async {
     try {
       final res = await Future.wait([
-        _db.collection('users').where('role', isEqualTo: 'delivery').get(),
-        _db.collection('users').where('role', isEqualTo: 'delivery').where('isOnline', isEqualTo: true).get(),
-        _db.collection('users').where('role', isEqualTo: 'staff').get(),
-        _db.collection('users').where('role', isEqualTo: 'manager').get(),
+        _db.collection('delivery_agents').get(),
+        _db.collection('delivery_agents').where('isOnline', isEqualTo: true).get(),
+        _db.collection('staff').get(),
+        _db.collection('managers').get(),
       ]);
       if (mounted) {
         setState(() {
@@ -258,11 +258,12 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     if (_loading) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         const CircularProgressIndicator(color: AdminTheme.gold, strokeWidth: 2.5),
         const SizedBox(height: 16),
-        Text('Loading analytics...', style: AdminTheme.label(13)),
+        Text('Loading analytics...', style: at.label(13)),
       ]));
     }
 
@@ -338,16 +339,18 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   }
 
   Widget _lastUpdated() {
+    final at = DynAdmin.of(context);
     return Row(children: [
-      Icon(Icons.update_rounded, size: 12, color: AdminTheme.textSecondary),
+      Icon(Icons.update_rounded, size: 12, color: at.textSecondary),
       const SizedBox(width: 4),
-      Text('Tap ↻ to refresh  ·  Pull down to reload', style: AdminTheme.label(11)),
+      Text('Tap ↻ to refresh  ·  Pull down to reload', style: at.label(11)),
     ]);
   }
 
   Widget _sectionLabel(String label) {
-    return Text(label, style: const TextStyle(
-      fontSize: 15, fontWeight: FontWeight.w800, color: AdminTheme.textPrimary));
+    final at = DynAdmin.of(context);
+    return Text(label, style: TextStyle(
+      fontSize: 15, fontWeight: FontWeight.w800, color: at.textPrimary));
   }
 
   // ── Revenue KPI row ──────────────────────────────────────────────
@@ -389,9 +392,10 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   }
 
   Widget _miniCard(String title, String value, IconData icon, Color color) {
+    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(children: [
         Container(
           padding: const EdgeInsets.all(8),
@@ -401,19 +405,20 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
         const SizedBox(height: 8),
         Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: color)),
         const SizedBox(height: 2),
-        Text(title, textAlign: TextAlign.center, style: AdminTheme.label(10)),
+        Text(title, textAlign: TextAlign.center, style: at.label(10)),
       ]),
     );
   }
 
   // ── Users & Employees ────────────────────────────────────────────
   Widget _usersEmployeesRow() {
+    final at = DynAdmin.of(context);
     return Row(children: [
       Expanded(child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: AdminTheme.cardDecoration(),
+        decoration: at.cardDecoration(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Users', style: AdminTheme.heading(13)),
+          Text('Users', style: at.heading(13)),
           const SizedBox(height: 12),
           _employeeRow('Total Users', _totalUsers, AdminTheme.accent, Icons.people_rounded),
           _employeeRow('New Today', _newUsersToday, AdminTheme.emerald, Icons.person_add_rounded),
@@ -423,9 +428,9 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
       const SizedBox(width: 12),
       Expanded(child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: AdminTheme.cardDecoration(),
+        decoration: at.cardDecoration(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Team', style: AdminTheme.heading(13)),
+          Text('Team', style: at.heading(13)),
           const SizedBox(height: 12),
           _employeeRow('Delivery', _totalDelivery, AdminTheme.gold, Icons.delivery_dining_rounded),
           _employeeRow('Online Now', _onlineAgents, AdminTheme.emerald, Icons.circle),
@@ -437,12 +442,13 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   }
 
   Widget _employeeRow(String label, int count, Color color, IconData icon) {
+    final at = DynAdmin.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(children: [
         Icon(icon, color: color, size: 14),
         const SizedBox(width: 6),
-        Expanded(child: Text(label, style: AdminTheme.label(12))),
+        Expanded(child: Text(label, style: at.label(12))),
         Text('$count', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: color)),
       ]),
     );
@@ -450,16 +456,17 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Revenue chart ────────────────────────────────────────────────
   Widget _revenueChart() {
+    final at = DynAdmin.of(context);
     final maxRev = _monthlyData.isEmpty ? 1.0
         : _monthlyData.map((e) => e['revenue'] as double).reduce(math.max).clamp(1.0, double.infinity);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(glow: true),
+      decoration: at.cardDecoration(glow: true),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Monthly Revenue', style: AdminTheme.heading(14)),
-            Text('Last 6 months performance', style: AdminTheme.label(11)),
+            Text('Monthly Revenue', style: at.heading(14)),
+            Text('Last 6 months performance', style: at.label(11)),
           ])),
           Row(children: [
             _chartToggle('bar', Icons.bar_chart_rounded),
@@ -471,7 +478,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
         SizedBox(height: 180, child: _chartType == 'bar' ? _barChart(maxRev) : _lineChart(maxRev)),
         const SizedBox(height: 10),
         Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: _monthlyData.map((e) => Text(e['month'], style: AdminTheme.label(11))).toList()),
+          children: _monthlyData.map((e) => Text(e['month'], style: at.label(11))).toList()),
       ]),
     );
   }
@@ -511,9 +518,10 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Order funnel ─────────────────────────────────────────────────
   Widget _orderFunnel() {
+    final at = DynAdmin.of(context);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(children: [
         _funnelRow('📋 Orders Placed', _totalOrders, _totalOrders, AdminTheme.gold),
         _funnelRow('🔄 Active/Processing', _activeOrders, _totalOrders, AdminTheme.accent),
@@ -524,12 +532,13 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   }
 
   Widget _funnelRow(String label, int count, int total, Color color) {
+    final at = DynAdmin.of(context);
     final pct = total > 0 ? (count / total).clamp(0.0, 1.0) : 0.0;
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Expanded(child: Text(label, style: AdminTheme.label(12))),
+          Expanded(child: Text(label, style: at.label(12))),
           Text('$count', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: color)),
           const SizedBox(width: 6),
           Text('${(pct * 100).toStringAsFixed(0)}%',
@@ -537,7 +546,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
         ]),
         const SizedBox(height: 5),
         Stack(children: [
-          Container(height: 8, decoration: BoxDecoration(color: AdminTheme.cardBorder, borderRadius: BorderRadius.circular(4))),
+          Container(height: 8, decoration: BoxDecoration(color: at.cardBorder, borderRadius: BorderRadius.circular(4))),
           AnimatedFractionallySizedBox(
             widthFactor: pct, duration: const Duration(milliseconds: 1000), curve: Curves.easeOutCubic,
             child: Container(height: 8, decoration: BoxDecoration(
@@ -553,14 +562,15 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Service revenue bars ──────────────────────────────────────────
   Widget _serviceRevenue() {
+    final at = DynAdmin.of(context);
     if (_revenueByService.isEmpty) {
-      return Container(padding: const EdgeInsets.all(20), decoration: AdminTheme.cardDecoration(),
-        child: Center(child: Text('No completed orders yet', style: AdminTheme.label(13))));
+      return Container(padding: const EdgeInsets.all(20), decoration: at.cardDecoration(),
+        child: Center(child: Text('No completed orders yet', style: at.label(13))));
     }
     final maxSvc = _revenueByService.values.reduce(math.max).clamp(1.0, double.infinity);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: _revenueByService.entries.toList().asMap().entries.map((entry) {
@@ -573,15 +583,15 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
             padding: const EdgeInsets.only(bottom: 16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Expanded(child: Text(e.key.toUpperCase(), style: AdminTheme.label(12))),
-                Text('$cnt orders', style: AdminTheme.label(11)),
+                Expanded(child: Text(e.key.toUpperCase(), style: at.label(12))),
+                Text('$cnt orders', style: at.label(11)),
                 const SizedBox(width: 8),
                 Text('₹${_fmtNum(e.value)}',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color)),
               ]),
               const SizedBox(height: 6),
               Stack(children: [
-                Container(height: 9, decoration: BoxDecoration(color: AdminTheme.cardBorder, borderRadius: BorderRadius.circular(5))),
+                Container(height: 9, decoration: BoxDecoration(color: at.cardBorder, borderRadius: BorderRadius.circular(5))),
                 AnimatedFractionallySizedBox(widthFactor: pct, duration: const Duration(milliseconds: 900),
                   child: Container(height: 9, decoration: BoxDecoration(
                     gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.5)]),
@@ -597,15 +607,16 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Payment methods ───────────────────────────────────────────────
   Widget _paymentMethodsCard() {
+    final at = DynAdmin.of(context);
     if (_paymentMethods.isEmpty) {
-      return Container(padding: const EdgeInsets.all(20), decoration: AdminTheme.cardDecoration(),
-        child: Center(child: Text('No payment data yet', style: AdminTheme.label(13))));
+      return Container(padding: const EdgeInsets.all(20), decoration: at.cardDecoration(),
+        child: Center(child: Text('No payment data yet', style: at.label(13))));
     }
     final total = _paymentMethods.values.fold(0, (s, v) => s + v);
     final colors = [AdminTheme.gold, AdminTheme.accent, AdminTheme.emerald, AdminTheme.violet, AdminTheme.rose];
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(
         children: _paymentMethods.entries.toList().asMap().entries.map((entry) {
           final i = entry.key;
@@ -621,13 +632,13 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Expanded(child: Text(label, style: AdminTheme.label(12))),
+                  Expanded(child: Text(label, style: at.label(12))),
                   Text('${e.value} orders · ${(pct * 100).toStringAsFixed(0)}%',
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
                 ]),
                 const SizedBox(height: 4),
                 Stack(children: [
-                  Container(height: 6, decoration: BoxDecoration(color: AdminTheme.cardBorder, borderRadius: BorderRadius.circular(3))),
+                  Container(height: 6, decoration: BoxDecoration(color: at.cardBorder, borderRadius: BorderRadius.circular(3))),
                   FractionallySizedBox(widthFactor: pct.clamp(0.0, 1.0),
                     child: Container(height: 6, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)))),
                 ]),
@@ -641,13 +652,14 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Top customers ─────────────────────────────────────────────────
   Widget _topCustomersCard() {
+    final at = DynAdmin.of(context);
     if (_topCustomers.isEmpty) {
-      return Container(padding: const EdgeInsets.all(20), decoration: AdminTheme.cardDecoration(),
-        child: Center(child: Text('No customer data yet', style: AdminTheme.label(13))));
+      return Container(padding: const EdgeInsets.all(20), decoration: at.cardDecoration(),
+        child: Center(child: Text('No customer data yet', style: at.label(13))));
     }
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(
         children: _topCustomers.asMap().entries.map((entry) {
           final i = entry.key;
@@ -665,12 +677,12 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Center(child: Text((c['name'] as String).isNotEmpty ? (c['name'] as String)[0].toUpperCase() : 'U',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AdminTheme.textPrimary))),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: at.textPrimary))),
               ),
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(c['name'] as String, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AdminTheme.textPrimary)),
-                Text('${c['orders']} orders', style: AdminTheme.label(11)),
+                Text(c['name'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: at.textPrimary)),
+                Text('${c['orders']} orders', style: at.label(11)),
               ])),
               Text('₹${_fmtNum(c['spent'] as double)}',
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AdminTheme.emerald)),
@@ -683,12 +695,13 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
 
   // ── Recent orders list ────────────────────────────────────────────
   Widget _recentOrdersList() {
+    final at = DynAdmin.of(context);
     if (_recentOrders.isEmpty) {
-      return Container(padding: const EdgeInsets.all(20), decoration: AdminTheme.cardDecoration(),
-        child: Center(child: Text('No orders yet', style: AdminTheme.label(13))));
+      return Container(padding: const EdgeInsets.all(20), decoration: at.cardDecoration(),
+        child: Center(child: Text('No orders yet', style: at.label(13))));
     }
     return Container(
-      decoration: AdminTheme.cardDecoration(),
+      decoration: at.cardDecoration(),
       child: Column(
         children: _recentOrders.asMap().entries.map((entry) {
           final i = entry.key;
@@ -698,7 +711,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
           final name = (o['customerName'] ?? 'Customer').toString();
           final statusColor = _statusColor(st);
           return Column(children: [
-            if (i > 0) Divider(color: AdminTheme.cardBorder, height: 1),
+            if (i > 0) Divider(color: at.cardBorder, height: 1),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(children: [
@@ -712,11 +725,11 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AdminTheme.textPrimary)),
-                  Text('#${(o['id'] as String).substring(0, 8).toUpperCase()}', style: AdminTheme.label(10)),
+                  Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: at.textPrimary)),
+                  Text('#${(o['id'] as String).substring(0, 8).toUpperCase()}', style: at.label(10)),
                 ])),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('₹${_fmtNum(amt)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AdminTheme.textPrimary)),
+                  Text('₹${_fmtNum(amt)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: at.textPrimary)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
@@ -732,6 +745,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
   }
 
   Widget _chartToggle(String type, IconData icon) {
+    final at = DynAdmin.of(context);
     final active = _chartType == type;
     return GestureDetector(
       onTap: () => setState(() => _chartType = type),
@@ -739,10 +753,10 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(7),
         decoration: BoxDecoration(
-          color: active ? AdminTheme.gold.withValues(alpha: 0.2) : AdminTheme.card,
+          color: active ? AdminTheme.gold.withValues(alpha: 0.2) : at.card,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: active ? AdminTheme.gold : AdminTheme.cardBorder)),
-        child: Icon(icon, color: active ? AdminTheme.gold : AdminTheme.textSecondary, size: 15),
+          border: Border.all(color: active ? AdminTheme.gold : at.cardBorder)),
+        child: Icon(icon, color: active ? AdminTheme.gold : at.textSecondary, size: 15),
       ),
     );
   }
@@ -755,7 +769,7 @@ class _AdminAnalyticsPageState extends State<AdminAnalyticsPage>
       case 'out_for_delivery': case 'delivery': return AdminTheme.gold;
       case 'delivered': case 'completed': return AdminTheme.emerald;
       case 'cancelled': return AdminTheme.rose;
-      default: return AdminTheme.textSecondary;
+      default: return const Color(0xFF9CA3AF);
     }
   }
 

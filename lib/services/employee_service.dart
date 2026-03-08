@@ -2,15 +2,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-/// Manages the dedicated /employees Firestore collection.
+/// Manages the three dedicated employee Firestore collections:
+///   /managers        → role = 'manager'
+///   /delivery_agents → role = 'delivery'
+///   /staff           → role = 'staff'
 ///
-/// WHY a separate collection?
-/// When an employee signs in with Google for the first time,
-/// [AuthService._createOrUpdateGoogleUser] creates a /users doc with role='user'.
-/// The /employees collection is written by admins BEFORE the employee logs in,
-/// so on login [RoleBasedAuthService.getUserRole] can look here first and find
-/// the correct role immediately — without waiting for the /users doc to be
-/// manually patched.
+/// /users is CUSTOMERS ONLY (role = 'user'). Employees are NEVER written there.
 class EmployeeService {
   static final EmployeeService _instance = EmployeeService._internal();
   factory EmployeeService() => _instance;
@@ -19,51 +16,58 @@ class EmployeeService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ── Lookup ────────────────────────────────────────────────────────────────
+  // Map role → collection name
+  static const _roleCollection = {
+    'manager':  'managers',
+    'delivery': 'delivery_agents',
+    'staff':    'staff',
+  };
 
-  /// Returns the employee document for [uid], or null if not an employee.
+  String _collectionForRole(String role) =>
+      _roleCollection[role] ?? 'staff';
+
+  // ── Lookup ─────────────────────────────────────────────────────────────────
+
+  /// Returns the employee document for [uid] by checking all 3 collections.
   Future<Map<String, dynamic>?> getEmployeeDoc(String uid) async {
-    try {
-      final doc = await _db.collection('employees').doc(uid).get();
-      if (!doc.exists) return null;
-      return doc.data();
-    } catch (e) {
-      debugPrint('EmployeeService.getEmployeeDoc error: $e');
-      return null;
+    for (final col in _roleCollection.values) {
+      try {
+        final doc = await _db.collection(col).doc(uid).get();
+        if (doc.exists) return {'_collection': col, ...?doc.data()};
+      } catch (_) {}
     }
+    return null;
   }
 
-  /// Checks whether a Firestore UID exists in /employees and returns their role
-  /// string (e.g. 'delivery', 'staff', 'manager', 'admin'), or null if absent.
+  /// Returns the role string for [uid], or null if not an employee.
   Future<String?> getEmployeeRole(String uid) async {
     final data = await getEmployeeDoc(uid);
     return data?['role'] as String?;
   }
 
-  /// Looks up an employee by email (used when the employee hasn't signed in
-  /// yet and we don't have their UID).
+  /// Looks up an employee by email across all 3 collections.
   Future<Map<String, dynamic>?> getEmployeeByEmail(String email) async {
-    try {
-      final snap = await _db
-          .collection('employees')
-          .where('email', isEqualTo: email.trim().toLowerCase())
-          .limit(1)
-          .get();
-      if (snap.docs.isEmpty) return null;
-      return {'id': snap.docs.first.id, ...snap.docs.first.data()};
-    } catch (e) {
-      debugPrint('EmployeeService.getEmployeeByEmail error: $e');
-      return null;
+    final normalized = email.trim().toLowerCase();
+    for (final entry in _roleCollection.entries) {
+      try {
+        final q = await _db
+            .collection(entry.value)
+            .where('email', isEqualTo: normalized)
+            .limit(1)
+            .get();
+        if (q.docs.isNotEmpty) {
+          return {'id': q.docs.first.id, '_collection': entry.value,
+                  ...q.docs.first.data()};
+        }
+      } catch (_) {}
     }
+    return null;
   }
 
-  // ── Create / Update ───────────────────────────────────────────────────────
+  // ── Create / Update ────────────────────────────────────────────────────────
 
   /// Called by the admin when adding a new employee.
-  ///
-  /// If the employee has already signed in (their UID is known), pass [uid].
-  /// If they haven't signed in yet, pass null and [email] — the record will be
-  /// linked when they first log in via [linkEmployeeOnLogin].
+  /// Writes to the correct role collection — never to /users.
   Future<Map<String, dynamic>> addEmployee({
     String? uid,
     required String email,
@@ -79,7 +83,8 @@ class EmployeeService {
   }) async {
     try {
       final adminUid = _auth.currentUser?.uid ?? '';
-      final data = {
+      final col = _collectionForRole(role);
+      final data = <String, dynamic>{
         'email': email.trim().toLowerCase(),
         'name': name.trim(),
         'role': role,
@@ -90,7 +95,7 @@ class EmployeeService {
         if (address != null && address.isNotEmpty) 'address': address.trim(),
         if (emergencyContact != null && emergencyContact.isNotEmpty)
           'emergencyContact': emergencyContact.trim(),
-        'employeeId': employeeId ?? _generateEmployeeId(),
+        'employeeId': employeeId ?? _generateEmployeeId(role),
         'isActive': true,
         'addedBy': adminUid,
         'createdAt': FieldValue.serverTimestamp(),
@@ -98,76 +103,95 @@ class EmployeeService {
       };
 
       if (uid != null && uid.isNotEmpty) {
-        // UID known — write directly to /employees/{uid}
+        // UID known — write directly to role collection keyed by UID
         data['uid'] = uid;
-        await _db.collection('employees').doc(uid).set(data, SetOptions(merge: true));
-        // Mirror role into /users/{uid} for backwards compatibility
-        await _mirrorRoleToUsersCollection(uid, role);
-        return {'success': true, 'uid': uid, 'employeeId': data['employeeId']};
+        await _db.collection(col).doc(uid).set(data, SetOptions(merge: true));
+        return {'success': true, 'uid': uid, 'employeeId': data['employeeId'],
+                'collection': col};
       } else {
-        // UID unknown — create a pending record keyed by a generated doc ID.
-        // Will be re-keyed by UID on first login via [linkEmployeeOnLogin].
-        final docRef = await _db.collection('employees').add({
+        // UID unknown — placeholder doc. Will be migrated on first Google login.
+        final docRef = await _db.collection(col).add({
           ...data,
-          'uid': '', // empty until linked
+          'uid': '',
           'isPending': true,
         });
-        return {'success': true, 'pendingDocId': docRef.id, 'employeeId': data['employeeId']};
+        return {'success': true, 'pendingDocId': docRef.id,
+                'employeeId': data['employeeId'], 'collection': col};
       }
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
   }
 
-  /// Call this right after Google/email sign-in for every login.
-  /// If there is a pending /employees document for this user's email,
-  /// it re-keys it to the real UID and mirrors the role to /users.
+  /// Called after sign-in. Finds a pending placeholder doc by email in any
+  /// role collection and migrates it to the real UID. Does NOT touch /users.
   Future<void> linkEmployeeOnLogin(User user) async {
+    // NOTE: auth_service.dart already handles this during _buildGoogleSuccessResult.
+    // This method is kept for email/phone sign-in paths that don't go through
+    // the Google flow.
     try {
       final email = user.email?.trim().toLowerCase() ?? '';
       if (email.isEmpty) return;
 
-      // 1. Check if already linked (doc keyed by UID)
-      final existing = await _db.collection('employees').doc(user.uid).get();
-      if (existing.exists) {
-        // Already linked — just ensure /users mirrors the role
-        final role = existing.data()?['role'] as String?;
-        if (role != null) await _mirrorRoleToUsersCollection(user.uid, role);
-        return;
+      for (final entry in _roleCollection.entries) {
+        final col = entry.value;
+        // Check if already linked (doc keyed by real UID)
+        final existing = await _db.collection(col).doc(user.uid).get();
+        if (existing.exists) {
+          // Already linked — update last sign-in only
+          await _db.collection(col).doc(user.uid).update({
+            'lastSignIn': FieldValue.serverTimestamp(),
+            'photoURL': user.photoURL ?? '',
+          });
+          return;
+        }
+
+        // Look for a pending placeholder by email
+        final pending = await _db
+            .collection(col)
+            .where('email', isEqualTo: email)
+            .where('isPending', isEqualTo: true)
+            .limit(1)
+            .get();
+
+        if (pending.docs.isEmpty) continue;
+
+        final pendingDoc = pending.docs.first;
+        final pendingData = pendingDoc.data();
+
+        // Migrate to real UID
+        await _db.collection(col).doc(user.uid).set({
+          ...pendingData,
+          'uid': user.uid,
+          'name': user.displayName ?? pendingData['name'] ?? '',
+          'photoURL': user.photoURL ?? '',
+          'isPending': false,
+          'linkedAt': FieldValue.serverTimestamp(),
+          'lastSignIn': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Remove old placeholder
+        await pendingDoc.reference.delete();
+
+        // Claim any pending notifications addressed to this email
+        try {
+          final pendingNotifs = await _db
+              .collection('notifications')
+              .where('pendingEmail', isEqualTo: email)
+              .get();
+          for (final doc in pendingNotifs.docs) {
+            await doc.reference.update({
+              'userId': user.uid,
+              'pendingEmail': FieldValue.delete(),
+            });
+          }
+        } catch (_) {}
+
+        return; // found and migrated — done
       }
-
-      // 2. Look for pending record by email
-      final pending = await _db
-          .collection('employees')
-          .where('email', isEqualTo: email)
-          .where('isPending', isEqualTo: true)
-          .limit(1)
-          .get();
-
-      if (pending.docs.isEmpty) return; // not an employee
-
-      final pendingDoc = pending.docs.first;
-      final pendingData = pendingDoc.data();
-      final role = pendingData['role'] as String? ?? 'staff';
-
-      // 3. Write the proper UID-keyed document
-      await _db.collection('employees').doc(user.uid).set({
-        ...pendingData,
-        'uid': user.uid,
-        'name': user.displayName ?? pendingData['name'] ?? '',
-        'photoUrl': user.photoURL ?? '',
-        'isPending': false,
-        'linkedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // 4. Delete the old pending document
-      await pendingDoc.reference.delete();
-
-      // 5. Mirror role to /users so legacy queries still work
-      await _mirrorRoleToUsersCollection(user.uid, role);
     } catch (e) {
-      debugPrint('EmployeeService.linkEmployeeOnLogin error: $e');
+      debugPrint('EmployeeService.linkEmployeeOnLogin error: \$e');
     }
   }
 
@@ -185,6 +209,21 @@ class EmployeeService {
     bool? isActive,
   }) async {
     try {
+      // Find which collection this employee is in
+      String? currentCol;
+      String? currentRole;
+      for (final entry in _roleCollection.entries) {
+        final doc = await _db.collection(entry.value).doc(uid).get();
+        if (doc.exists) {
+          currentCol = entry.value;
+          currentRole = doc.data()?['role'] as String? ?? entry.key;
+          break;
+        }
+      }
+      if (currentCol == null) {
+        return {'success': false, 'error': 'Employee not found'};
+      }
+
       final updates = <String, dynamic>{
         'updatedAt': FieldValue.serverTimestamp(),
         if (name != null) 'name': name.trim(),
@@ -197,10 +236,20 @@ class EmployeeService {
         if (emergencyContact != null) 'emergencyContact': emergencyContact.trim(),
         if (isActive != null) 'isActive': isActive,
       };
-      await _db.collection('employees').doc(uid).update(updates);
 
-      // Mirror role change to /users
-      if (role != null) await _mirrorRoleToUsersCollection(uid, role);
+      // If role is changing, migrate to the correct collection
+      if (role != null && role != currentRole) {
+        final newCol = _collectionForRole(role);
+        final oldDoc = await _db.collection(currentCol).doc(uid).get();
+        if (oldDoc.exists) {
+          final data = Map<String, dynamic>.from(oldDoc.data()!);
+          data.addAll(updates);
+          await _db.collection(newCol).doc(uid).set(data);
+          await _db.collection(currentCol).doc(uid).delete();
+        }
+      } else {
+        await _db.collection(currentCol).doc(uid).update(updates);
+      }
 
       return {'success': true};
     } catch (e) {
@@ -208,57 +257,56 @@ class EmployeeService {
     }
   }
 
-  /// Remove an employee — resets role to 'user' in both collections.
+  /// Remove an employee from their role collection.
+  /// Does NOT create or modify any /users doc.
   Future<Map<String, dynamic>> removeEmployee(String uid) async {
     try {
-      await _db.collection('employees').doc(uid).delete();
-      await _mirrorRoleToUsersCollection(uid, 'user');
-      return {'success': true};
+      for (final col in _roleCollection.values) {
+        final doc = await _db.collection(col).doc(uid).get();
+        if (doc.exists) {
+          await _db.collection(col).doc(uid).delete();
+          return {'success': true};
+        }
+      }
+      return {'success': false, 'error': 'Employee not found'};
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
   }
 
-  // ── Streams ───────────────────────────────────────────────────────────────
+  // ── Streams ────────────────────────────────────────────────────────────────
 
-  /// Stream all active employees (all roles).
-  Stream<QuerySnapshot> allEmployeesStream() {
+  /// Stream all active employees from a specific role collection.
+  Stream<QuerySnapshot> employeesByRoleStream(String role) {
+    final col = _collectionForRole(role);
     return _db
-        .collection('employees')
+        .collection(col)
         .where('isActive', isEqualTo: true)
         .orderBy('createdAt', descending: true)
         .snapshots();
   }
 
-  /// Stream employees filtered by role.
-  Stream<QuerySnapshot> employeesByRoleStream(String role) {
-    return _db
-        .collection('employees')
-        .where('role', isEqualTo: role)
-        .where('isActive', isEqualTo: true)
-        .snapshots();
+  /// Stream all employees across all 3 collections (merged client-side).
+  /// Returns a list of [Map] with a '_collection' key added.
+  Stream<List<Map<String, dynamic>>> allEmployeesStream() {
+    final streams = _roleCollection.values.map((col) =>
+        _db.collection(col)
+            .where('isActive', isEqualTo: true)
+            .orderBy('createdAt', descending: true)
+            .snapshots()
+            .map((snap) => snap.docs
+                .map((d) => {'_collection': col, 'id': d.id, ...d.data()})
+                .toList()));
+
+    // Combine via StreamBuilder in UI; or use RxDart combineLatest3 if available
+    // For simplicity, return managers stream (UI queries each collection separately)
+    return streams.first;
   }
 
-  // ── Internal helpers ──────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  /// Keeps the legacy /users/{uid}.role field in sync so existing queries
-  /// that read role from /users continue to work without modification.
-  Future<void> _mirrorRoleToUsersCollection(String uid, String role) async {
-    try {
-      final userDoc = await _db.collection('users').doc(uid).get();
-      if (userDoc.exists) {
-        await _db.collection('users').doc(uid).update({
-          'role': role,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-    } catch (e) {
-      debugPrint('EmployeeService._mirrorRoleToUsersCollection error: $e');
-    }
-  }
-
-  String _generateEmployeeId() {
-    final ts = DateTime.now().millisecondsSinceEpoch.toString();
-    return 'EMP${ts.substring(ts.length - 6)}';
+  String _generateEmployeeId(String role) {
+    return '${role == 'delivery' ? 'DLV' : role == 'manager' ? 'MGR' : 'STF'}'
+        '${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
   }
 }

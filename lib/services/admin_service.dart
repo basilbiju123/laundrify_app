@@ -246,10 +246,9 @@ class AdminService {
           })
           .length;
 
-      // Get delivery personnel count
-      final deliveryPersonnel = usersSnapshot.docs
-          .where((doc) => doc.data()['role'] == 'delivery')
-          .length;
+      // Get delivery personnel count from correct collection
+      final deliverySnap = await _db.collection('delivery_agents').count().get();
+      final deliveryPersonnel = deliverySnap.count ?? 0;
 
       return {
         'totalUsers': totalUsers,

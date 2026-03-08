@@ -14,8 +14,6 @@ import 'cancel_order_page.dart';
 // MY ORDERS PAGE — Real Firestore data, filter, PDF invoice
 // ═══════════════════════════════════════════════════════════
 
-const _navyCard = Color(0xFF111827);
-const _navyBorder = Color(0xFF1C2537);
 const _blue = Color(0xFF1B4FD8);
 const _blueSoft = Color(0xFF3B82F6);
 const _gold = Color(0xFFF5C518);
@@ -101,9 +99,9 @@ class _OrdersPageState extends State<OrdersPage> {
               margin: const EdgeInsets.symmetric(horizontal: 20),
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
-                color: t.isDark ? _navyCard : t.card,
+                color: t.card,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: t.isDark ? _navyBorder : t.cardBdr),
+                border: Border.all(color: t.cardBdr),
               ),
               child: Row(
                 children: _filters.map((f) => _toggleFilterBtn(f, t)).toList(),
@@ -205,10 +203,10 @@ class _OrdersPageState extends State<OrdersPage> {
                                     children: [
                                   Text(
                                       '#${fId.length >= 8 ? fId.substring(0, 8).toUpperCase() : fId.toUpperCase()}',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w800,
-                                          color: Colors.white)),
+                                          color: t.textHi)),
                                   Text(fd['failureReason'] ?? 'Payment failed',
                                       style: TextStyle(
                                           fontSize: 11,
@@ -219,10 +217,10 @@ class _OrdersPageState extends State<OrdersPage> {
                                 children: [
                                   Text(
                                       '₹${((fd['totalAmount'] ?? fd['total'] ?? 0) as num).toStringAsFixed(0)}',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w900,
-                                          color: Colors.white)),
+                                          color: t.textHi)),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 7, vertical: 3),
@@ -687,9 +685,9 @@ class _OrderCard extends StatelessWidget {
             ? 'Pickup: $pickupDate'
             : '';
 
-    final cardColor = t.isDark ? _navyCard : Colors.white;
+    final cardColor = t.card;
     final borderColor = t.isDark
-        ? (isActive ? color.withValues(alpha: 0.3) : _navyBorder)
+        ? (isActive ? color.withValues(alpha: 0.3) : t.cardBdr)
         : (isActive ? color.withValues(alpha: 0.25) : t.cardBdr);
 
     return GestureDetector(
@@ -830,7 +828,7 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
 
-            Divider(height: 1, color: t.isDark ? _navyBorder : t.cardBdr),
+            Divider(height: 1, color: t.cardBdr),
             // Primary action row
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),

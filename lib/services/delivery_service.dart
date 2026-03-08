@@ -18,7 +18,7 @@ class DeliveryService {
 
   Future<Map<String, dynamic>> getDeliveryStats(String deliveryPersonId) async {
     try {
-      final userDoc = await _db.collection('users').doc(deliveryPersonId).get();
+      final userDoc = await _db.collection('delivery_agents').doc(deliveryPersonId).get();
       final userData = userDoc.data() ?? {};
 
       final completedSnap = await _db
@@ -159,7 +159,7 @@ class DeliveryService {
       final assignedTo = orderDoc.data()?['assignedTo'] as String?;
       if (assignedTo != null) {
         final earnings = ((orderDoc.data()?['totalAmount'] ?? 0) as num) * 0.15;
-        await _db.collection('users').doc(assignedTo).update({
+        await _db.collection('delivery_agents').doc(assignedTo).update({
           'completedOrders': FieldValue.increment(1),
           'totalEarnings': FieldValue.increment(earnings),
           'updatedAt': FieldValue.serverTimestamp(),

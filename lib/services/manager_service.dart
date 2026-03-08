@@ -39,8 +39,7 @@ class ManagerService {
           .get();
 
       final deliverySnap = await _db
-          .collection('users')
-          .where('role', isEqualTo: 'delivery')
+          .collection('delivery_agents')
           .get();
 
       double monthRevenue = 0;
@@ -117,8 +116,7 @@ class ManagerService {
 
   Stream<List<Map<String, dynamic>>> getDeliveryPersonnel() {
     return _db
-        .collection('users')
-        .where('role', isEqualTo: 'delivery')
+        .collection('delivery_agents')
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => {'id': doc.id, ...doc.data()})
@@ -128,8 +126,7 @@ class ManagerService {
   Future<List<Map<String, dynamic>>> getAvailableDeliveryPersonnel() async {
     try {
       final snap = await _db
-          .collection('users')
-          .where('role', isEqualTo: 'delivery')
+          .collection('delivery_agents')
           .where('isAvailable', isEqualTo: true)
           .get();
       return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/delivery_service.dart';
 import '../services/account_service.dart';
@@ -56,6 +58,8 @@ class _DeliveryDashboardState extends State<DeliveryDashboard>
               borderRadius: BorderRadius.circular(16),
             ),
             child: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
               controller: _tabController,
               indicator: BoxDecoration(
                 color: const Color(0xFF3F6FD8),
@@ -638,16 +642,38 @@ class _DeliveryDashboardState extends State<DeliveryDashboard>
     }
   }
 
-  void _navigateToCustomer(Map<String, dynamic> order) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Opening navigation...')),
-    );
+  Future<void> _navigateToCustomer(Map<String, dynamic> order) async {
+    final addr = order['address'] ?? order['pickupAddress'] ?? order['deliveryAddress'] ?? '';
+    final lat = order['pickupLat'] ?? order['lat'] ?? order['latitude'];
+    final lng = order['pickupLng'] ?? order['lng'] ?? order['longitude'];
+    if (addr.isEmpty && lat == null) return;
+
+    Uri uri;
+    if (lat != null && lng != null) {
+      uri = kIsWeb
+          ? Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving')
+          : Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    } else {
+      uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(addr)}&travelmode=driving');
+    }
+
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
+    } else {
+      final webUri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(addr)}&travelmode=driving');
+      if (await canLaunchUrl(webUri)) await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    }
   }
 
-  void _contactCustomer(Map<String, dynamic> order) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Calling customer...')),
-    );
+  Future<void> _contactCustomer(Map<String, dynamic> order) async {
+    final phone = order['customerPhone'] ?? order['phone'] ?? '';
+    if (phone.isEmpty) return;
+    final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    final intl = cleaned.startsWith('+') ? cleaned : '+91$cleaned';
+    final uri = Uri.parse('tel:$intl');
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   Future<void> _handleSignOut() async {

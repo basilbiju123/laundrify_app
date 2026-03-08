@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'screens/splash_page.dart';
@@ -50,7 +51,10 @@ class _AppEntryPointState extends State<AppEntryPoint> {
   @override
   Widget build(BuildContext context) {
     if (_onboardingDone == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: Color(0xFF080F1E),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFF5C518))),
+      );
     }
     if (!_splashFinished) {
       return SplashPage(onFinished: _onSplashFinished);
@@ -96,6 +100,43 @@ class _AuthedRouterState extends State<_AuthedRouter> {
   }
 
   Future<void> _route() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    // ── Block check: check /users AND all role collections ──────────────────
+    if (user != null) {
+      try {
+        bool isBlocked = false;
+        // Check /users first
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+          isBlocked = (userDoc.data()?['isBlocked'] ?? false) == true;
+        }
+        // Also check role collections (employees not in /users)
+        if (!isBlocked) {
+          for (final col in ['delivery_agents', 'managers', 'staff']) {
+            final doc = await FirebaseFirestore.instance
+                .collection(col).doc(user.uid).get();
+            if (doc.exists && (doc.data()?['isBlocked'] ?? false) == true) {
+              isBlocked = true;
+              break;
+            }
+          }
+        }
+        if (isBlocked) {
+          await FirebaseAuth.instance.signOut();
+          if (!mounted) return;
+          setState(() {
+            _destination = const _BlockedAccountScreen();
+            _routing = false;
+          });
+          return;
+        }
+      } catch (_) {
+        // If Firestore unreachable, allow through — don't block on network error
+      }
+    }
+
     final accessibleRoles = await widget.roleService.getUserAccessibleRoles();
     if (!mounted) return;
 
@@ -132,5 +173,87 @@ class _AuthedRouterState extends State<_AuthedRouter> {
       );
     }
     return _destination!;
+  }
+}
+
+// ── Shown when a blocked user tries to sign in ────────────────────────────
+class _BlockedAccountScreen extends StatelessWidget {
+  const _BlockedAccountScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF080F1E),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Red block icon
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.4),
+                      width: 2),
+                ),
+                child: const Icon(
+                  Icons.block_rounded,
+                  color: Color(0xFFEF4444),
+                  size: 44,
+                ),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Account Suspended',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your account has been suspended by an administrator. Please contact support if you believe this is a mistake.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 14,
+                  height: 1.7,
+                ),
+              ),
+              const SizedBox(height: 36),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                    // StreamBuilder in build() will automatically
+                    // re-render to AuthOptionsPage on sign-out
+                  },
+                  icon: const Icon(Icons.logout_rounded, size: 18),
+                  label: const Text(
+                    'Back to Sign In',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF94A3B8),
+                    side: const BorderSide(color: Color(0xFF2D3A52)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

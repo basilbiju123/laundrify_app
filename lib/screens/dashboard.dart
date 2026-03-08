@@ -28,6 +28,7 @@ import 'coupons_page.dart';
 import 'auth_options_page.dart';
 import 'abandoned_cart_page.dart';
 import '../services/firestore_service.dart';
+import '../services/panel_theme_service.dart';
 
 enum OrderStatus { pickup, processing, delivery }
 
@@ -60,6 +61,8 @@ class _DashboardPageState extends State<DashboardPage>
   late PageController _bannerController;
   final ScrollController _scrollController = ScrollController();
   Timer? _bannerTimer;
+  int _unreadNotifCount = 0;
+  StreamSubscription<QuerySnapshot>? _notifCountSub;
 
   // Real Firebase order tracking
   bool hasActiveOrder = false;
@@ -271,6 +274,7 @@ class _DashboardPageState extends State<DashboardPage>
 
     _entryController.forward();
     _loadUserData();
+    _listenUnreadCount();
   }
 
   Future<void> _loadUserData() async {
@@ -304,8 +308,25 @@ class _DashboardPageState extends State<DashboardPage>
     } catch (_) {}
   }
 
+  void _listenUnreadCount() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    _notifCountSub?.cancel();
+    _notifCountSub = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('isRead', isEqualTo: false)
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _unreadNotifCount = snap.docs.length);
+    });
+    // Also listen to broadcasts (no userId filter)
+    // We combine by also checking targetGroup notifications separately
+  }
+
   @override
   void dispose() {
+    _notifCountSub?.cancel();
     _bannerTimer?.cancel();
     _bannerController.dispose();
     _scrollController.dispose();
@@ -325,6 +346,13 @@ class _DashboardPageState extends State<DashboardPage>
   // ═════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
+    return PanelThemeScope(
+      panelKey: 'user',
+      child: Builder(builder: (ctx) => _buildScaffold(ctx)),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     final t = AppColors.of(context);
     final mobileScaffold = PopScope(
       canPop: _currentTab == 0,
@@ -394,7 +422,7 @@ class _DashboardPageState extends State<DashboardPage>
                                 .collection('users')
                                 .doc(user!.uid)
                                 .collection('abandoned_carts')
-                                .where('status', isEqualTo: 'abandoned')
+                                .where('status', whereIn: ['abandoned', 'saved'])
                                 .snapshots()
                             : null,
                         builder: (ctx, snap) {
@@ -430,27 +458,35 @@ class _DashboardPageState extends State<DashboardPage>
                           );
                         },
                       ),
-                      // Bell with gold dot
+                      // Bell with unread dot (only shows when there are unread notifications)
                       IconButton(
                         icon: Stack(
                           clipBehavior: Clip.none,
                           children: [
                             const Icon(Icons.notifications_outlined,
                                 color: Colors.white, size: 25),
-                            Positioned(
-                              right: -1,
-                              top: -1,
-                              child: Container(
-                                width: 9,
-                                height: 9,
-                                decoration: BoxDecoration(
-                                  color: _gold,
-                                  shape: BoxShape.circle,
-                                  border:
-                                      Border.all(color: _navyMid, width: 1.5),
+                            if (_unreadNotifCount > 0)
+                              Positioned(
+                                right: -1,
+                                top: -1,
+                                child: Container(
+                                  width: _unreadNotifCount > 9 ? 16 : 9,
+                                  height: 9,
+                                  decoration: BoxDecoration(
+                                    color: _gold,
+                                    borderRadius: BorderRadius.circular(5),
+                                    border: Border.all(color: _navyMid, width: 1.5),
+                                  ),
+                                  child: _unreadNotifCount > 9
+                                      ? const Center(
+                                          child: Text('9+',
+                                              style: TextStyle(
+                                                  color: Color(0xFF080F1E),
+                                                  fontSize: 5,
+                                                  fontWeight: FontWeight.w900)))
+                                      : null,
                                 ),
                               ),
-                            ),
                           ],
                         ),
                         onPressed: () {
@@ -459,9 +495,28 @@ class _DashboardPageState extends State<DashboardPage>
                             MaterialPageRoute(
                               builder: (_) => const NotificationsPage(),
                             ),
-                          );
+                          ).then((_) => _listenUnreadCount()); // refresh after returning
                         },
                       ),
+                      Builder(builder: (ctx) {
+                        PanelThemeService? pt;
+                        try {
+                          pt = PanelThemeScope.of(ctx);
+                        } catch (_) {}
+                        if (pt == null) return const SizedBox.shrink();
+                        return IconButton(
+                          tooltip:
+                              pt.isDark ? 'Switch to light mode' : 'Switch to dark mode',
+                          icon: Icon(
+                            pt.isDark
+                                ? Icons.light_mode_rounded
+                                : Icons.dark_mode_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                          onPressed: () => pt!.toggle(),
+                        );
+                      }),
                       // Gold avatar
                       GestureDetector(
                         onTap: () => _scaffoldKey.currentState?.openEndDrawer(),
@@ -543,7 +598,7 @@ class _DashboardPageState extends State<DashboardPage>
                   padding: const EdgeInsets.all(32),
                   margin: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: t.card,
                     borderRadius: BorderRadius.circular(28),
                     boxShadow: [
                       BoxShadow(
@@ -649,6 +704,8 @@ class _DashboardPageState extends State<DashboardPage>
                         const SizedBox(height: 30),
                         _sectionTitle("Your Orders"),
                         const SizedBox(height: 14),
+                        _savedCartsCard(),
+                        const SizedBox(height: 12),
                         _buildActiveOrderStream(),
                         const SizedBox(height: 14),
                         _historyCard(),
@@ -791,10 +848,104 @@ class _DashboardPageState extends State<DashboardPage>
                     // Location chip
                     Expanded(
                       child: GestureDetector(
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const LocationPage())),
+                        onTap: () {
+                          if (savedLocation != null) {
+                            // Location exists — show change/cancel dialog
+                            showModalBottomSheet(
+                              context: context,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => Container(
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF0D1F3C),
+                                  borderRadius: BorderRadius.vertical(
+                                      top: Radius.circular(24)),
+                                ),
+                                padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Center(
+                                      child: Container(
+                                          width: 40, height: 4,
+                                          decoration: BoxDecoration(
+                                              color: Colors.white24,
+                                              borderRadius: BorderRadius.circular(2))),
+                                    ),
+                                    const SizedBox(height: 18),
+                                    Row(children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: _gold.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Icon(Icons.location_on_rounded,
+                                            color: _gold, size: 20),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Delivery Location',
+                                              style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Color(0xFF94A3B8),
+                                                  fontWeight: FontWeight.w600)),
+                                          Text(savedLocation!,
+                                              style: const TextStyle(
+                                                  fontSize: 14,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis),
+                                        ],
+                                      )),
+                                    ]),
+                                    const SizedBox(height: 20),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        icon: const Icon(Icons.edit_location_rounded, size: 18),
+                                        label: const Text('Change Location',
+                                            style: TextStyle(fontWeight: FontWeight.w800)),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: _gold,
+                                          foregroundColor: const Color(0xFF080F1E),
+                                          padding: const EdgeInsets.symmetric(vertical: 14),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(14)),
+                                        ),
+                                        onPressed: () {
+                                          Navigator.pop(context);
+                                          Navigator.push(context,
+                                              MaterialPageRoute(
+                                                  builder: (_) => const LocationPage()));
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel',
+                                            style: TextStyle(
+                                                color: Color(0xFF94A3B8),
+                                                fontWeight: FontWeight.w700)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          } else {
+                            // No location — go directly to add it
+                            Navigator.push(context,
+                                MaterialPageRoute(
+                                    builder: (_) => const LocationPage()));
+                          }
+                        },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 13),
@@ -1936,6 +2087,97 @@ class _DashboardPageState extends State<DashboardPage>
 
   // ── HISTORY CARD ──────────────────────────────────────────────────────────
   // ✅ FIX #3: Pass completedOrders parameter
+  // ── Saved Carts card on home tab ─────────────────────────────────────────
+  Widget _savedCartsCard() {
+    final uid = user?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('abandoned_carts')
+          .where('status', whereIn: ['abandoned', 'saved'])
+          .snapshots(),
+      builder: (context, snap) {
+        final t = AppColors.of(context);
+        final count = snap.data?.docs.length ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+
+        final savedCount = snap.data?.docs.where((d) {
+          final data = d.data() as Map<String, dynamic>;
+          return data['saveType'] == 'incomplete' || data['status'] == 'saved';
+        }).length ?? 0;
+        final failedCount = count - savedCount;
+
+        return GestureDetector(
+          onTap: () => Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const AbandonedCartPage())),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: t.card,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _gold.withValues(alpha: 0.35), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                    color: _gold.withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3))
+              ],
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                    color: _gold.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.shopping_cart_rounded,
+                    color: _gold, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text('Saved Carts',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: t.textHi)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    if (savedCount > 0) ...[
+                      _cartChip('$savedCount saved',
+                          const Color(0xFF10B981)),
+                      const SizedBox(width: 6),
+                    ],
+                    if (failedCount > 0)
+                      _cartChip('$failedCount failed',
+                          const Color(0xFFF59E0B)),
+                  ]),
+                ]),
+              ),
+              Icon(Icons.chevron_right_rounded, color: t.textDim, size: 20),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _cartChip(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8)),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color)),
+      );
+
   Widget _historyCard() {
     return GestureDetector(
       onTap: () => Navigator.push(

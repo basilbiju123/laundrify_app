@@ -16,6 +16,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final _db   = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
+  @override
+  void initState() {
+    super.initState();
+    // Mark all as read when user opens notifications page
+    WidgetsBinding.instance.addPostFrameCallback((_) => _markAllRead());
+  }
+
   Future<void> _markAllRead() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -52,6 +59,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   IconData _getIcon(String? type) {
     switch (type) {
+      case 'welcome':          return Icons.waving_hand_rounded;
+      case 'employee_welcome': return Icons.work_rounded;
       case 'order_update': return Icons.local_laundry_service_rounded;
       case 'promo':        return Icons.local_offer_rounded;
       case 'payment':      return Icons.payment_rounded;

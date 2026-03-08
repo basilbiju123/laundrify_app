@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/notification_service.dart';
+import '../services/employee_notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // ═══════════════════════════════════════════════════════════
@@ -277,6 +279,27 @@ class _CancelOrderPageState extends State<CancelOrderPage> {
       });
 
       await batch.commit();
+
+      // Local notification — instant, no FCM needed
+      NotificationService().showOrderNotification(
+        title: '❌ Order Cancelled',
+        body: 'Your order has been cancelled. Refund of ₹${_cashbackAmount.toStringAsFixed(0)} will be processed.',
+        orderId: widget.orderId,
+      );
+
+      // Send cancellation email
+      try {
+        final cu = FirebaseAuth.instance.currentUser;
+        if (cu?.email != null) {
+          EmployeeNotificationService().sendOrderCancelledEmail(
+            name: cu?.displayName ?? 'Customer',
+            email: cu!.email!,
+            orderId: widget.orderId,
+            refundAmount: _cashbackAmount,
+            refundMethod: _refundMethod,
+          );
+        }
+      } catch (_) {}
 
       setState(() {
         _isProcessing = false;

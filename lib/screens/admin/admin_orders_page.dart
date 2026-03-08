@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/notification_service.dart';
+import '../../services/employee_notification_service.dart';
 import 'admin_theme.dart';
 
 class AdminOrdersPage extends StatefulWidget {
@@ -47,6 +49,7 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -60,23 +63,23 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: TextField(
             controller: _searchCtrl,
-            style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
+            style: TextStyle(color: at.textPrimary, fontSize: 14),
             onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
             decoration: InputDecoration(
               hintText: 'Search orders...',
-              hintStyle: AdminTheme.label(14),
-              prefixIcon: const Icon(Icons.search_rounded,
-                  color: AdminTheme.textSecondary, size: 20),
+              hintStyle: at.label(14),
+              prefixIcon: Icon(Icons.search_rounded,
+                  color: at.textSecondary, size: 20),
               filled: true,
-              fillColor: AdminTheme.card,
+              fillColor: at.card,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: AdminTheme.cardBorder)),
+                  borderSide: BorderSide(color: at.cardBorder)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: AdminTheme.cardBorder)),
+                  borderSide: BorderSide(color: at.cardBorder)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide:
@@ -105,10 +108,10 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
                   duration: const Duration(milliseconds: 220),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                    color: active ? AdminTheme.gold.withValues(alpha: 0.15) : AdminTheme.card,
+                    color: active ? AdminTheme.gold.withValues(alpha: 0.15) : at.card,
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                      color: active ? AdminTheme.gold : AdminTheme.cardBorder,
+                      color: active ? AdminTheme.gold : at.cardBorder,
                       width: active ? 1.5 : 1,
                     ),
                     boxShadow: active ? [
@@ -120,7 +123,7 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
-                      color: active ? AdminTheme.gold : AdminTheme.textSecondary,
+                      color: active ? AdminTheme.gold : at.textSecondary,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -151,10 +154,10 @@ class _AdminOrdersPageState extends State<AdminOrdersPage>
               if (!snap.hasData || snap.data!.docs.isEmpty) {
                 return Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.shopping_bag_outlined,
-                      color: AdminTheme.textMuted, size: 56),
+                  Icon(Icons.shopping_bag_outlined,
+                      color: at.textMuted, size: 56),
                   const SizedBox(height: 16),
-                  Text('No orders found', style: AdminTheme.heading(16)),
+                  Text('No orders found', style: at.heading(16)),
                 ]));
               }
 
@@ -190,6 +193,7 @@ class _AdminOrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     final d = doc.data() as Map<String, dynamic>;
     final status = d['status'] ?? 'pending';
     final color = statusColor(status);
@@ -200,7 +204,7 @@ class _AdminOrderCard extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
-        decoration: AdminTheme.cardDecoration(),
+        decoration: at.cardDecoration(),
         child: Column(children: [
           Row(children: [
             Container(
@@ -217,31 +221,31 @@ class _AdminOrderCard extends StatelessWidget {
                   Row(children: [
                     Expanded(
                         child: Text(d['customerName'] ?? 'Customer',
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w800,
-                                color: AdminTheme.textPrimary))),
+                                color: at.textPrimary))),
                     AdminBadge(label: status, color: color, fontSize: 10),
                   ]),
                   const SizedBox(height: 4),
                   Text(
                       '#${doc.id.substring(0, 8).toUpperCase()}  •  ${d['serviceType'] ?? 'Laundry'}',
-                      style: AdminTheme.label(12)),
+                      style: at.label(12)),
                 ])),
           ]),
           const SizedBox(height: 14),
-          Container(height: 1, color: AdminTheme.cardBorder),
+          Container(height: 1, color: at.cardBorder),
           const SizedBox(height: 12),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _chip(Icons.location_on_outlined,
+            _chip(context, Icons.location_on_outlined,
                 d['pickupAddress'] ?? d['address'] ?? 'N/A'),
-            _chip(Icons.schedule_rounded,
+            _chip(context, Icons.schedule_rounded,
                 ts != null ? '${ts.day}/${ts.month}' : 'N/A'),
             Text('₹${(d['totalAmount'] ?? 0).toStringAsFixed(0)}',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
-                    color: AdminTheme.textPrimary)),
+                    color: at.textPrimary)),
           ]),
           if (d['driverId'] != null) ...[
             const SizedBox(height: 10),
@@ -270,15 +274,18 @@ class _AdminOrderCard extends StatelessWidget {
     );
   }
 
-  Widget _chip(IconData icon, String text) =>
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: AdminTheme.textSecondary, size: 13),
+  Widget _chip(BuildContext context, IconData icon, String text) {
+    final at = DynAdmin.of(context);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: at.textSecondary, size: 13),
         const SizedBox(width: 4),
         Text(text.length > 16 ? '${text.substring(0, 14)}...' : text,
-            style: AdminTheme.label(11)),
+            style: at.label(11)),
       ]);
+  }
 
   void _showDetail(BuildContext ctx, String orderId, Map<String, dynamic> d) {
+    final at = DynAdmin.of(ctx);
     final statuses = [
       'pending',
       'assigned',
@@ -301,7 +308,7 @@ class _AdminOrderCard extends StatelessWidget {
         builder: (ctx2, setLocal) => Container(
           height: MediaQuery.of(ctx).size.height * 0.92,
           decoration: BoxDecoration(
-              color: AdminTheme.surface,
+              color: at.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
           child: Column(children: [
             Container(
@@ -309,7 +316,7 @@ class _AdminOrderCard extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
-                    color: AdminTheme.textMuted,
+                    color: at.textMuted,
                     borderRadius: BorderRadius.circular(2))),
             Expanded(
                 child: SingleChildScrollView(
@@ -320,33 +327,33 @@ class _AdminOrderCard extends StatelessWidget {
                     Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Order Details', style: AdminTheme.heading(20)),
+                          Text('Order Details', style: at.heading(20)),
                           AdminBadge(
                               label: selStatus, color: statusColor(selStatus)),
                         ]),
                     const SizedBox(height: 4),
                     Text('#${orderId.substring(0, 8).toUpperCase()}',
-                        style: AdminTheme.label(13)),
+                        style: at.label(13)),
                     const SizedBox(height: 24),
 
-                    _section('Customer Info', [
-                      _row('Name', d['customerName'] ?? 'N/A'),
-                      _row('Phone', d['customerPhone'] ?? 'N/A'),
-                      _row('Pickup',
+                    _section(ctx, 'Customer Info', [
+                      _row(ctx, 'Name', d['customerName'] ?? 'N/A'),
+                      _row(ctx, 'Phone', d['customerPhone'] ?? 'N/A'),
+                      _row(ctx, 'Pickup',
                           d['pickupAddress'] ?? d['address'] ?? 'N/A'),
-                      _row('Delivery', d['deliveryAddress'] ?? 'N/A'),
+                      _row(ctx, 'Delivery', d['deliveryAddress'] ?? 'N/A'),
                     ]),
                     const SizedBox(height: 16),
-                    _section('Order Info', [
-                      _row('Service', d['serviceType'] ?? 'Laundry'),
-                      _row('Amount',
+                    _section(ctx, 'Order Info', [
+                      _row(ctx, 'Service', d['serviceType'] ?? 'Laundry'),
+                      _row(ctx, 'Amount',
                           '₹${(d['totalAmount'] ?? 0).toStringAsFixed(2)}'),
-                      _row('Payment', d['paymentStatus'] ?? 'pending'),
+                      _row(ctx, 'Payment', d['paymentStatus'] ?? 'pending'),
                     ]),
                     const SizedBox(height: 16),
 
                     // DRIVER ASSIGNMENT
-                    Text('Assign Driver', style: AdminTheme.heading(15)),
+                    Text('Assign Driver', style: at.heading(15)),
                     const SizedBox(height: 12),
                     if (selDriverId != null)
                       Container(
@@ -380,8 +387,8 @@ class _AdminOrderCard extends StatelessWidget {
                       ),
                     StreamBuilder<QuerySnapshot>(
                       stream: db
-                          .collection('users')
-                          .where('role', isEqualTo: 'delivery')
+                          .collection('delivery_agents')
+                          .where('isActive', isEqualTo: true)
                           .snapshots(),
                       builder: (_, dSnap) {
                         if (!dSnap.hasData) {
@@ -395,13 +402,13 @@ class _AdminOrderCard extends StatelessWidget {
                         if (drivers.isEmpty) {
                           return Container(
                             padding: const EdgeInsets.all(14),
-                            decoration: AdminTheme.cardDecoration(),
+                            decoration: at.cardDecoration(),
                             child: Row(children: [
-                              const Icon(Icons.info_outline,
-                                  color: AdminTheme.textSecondary, size: 18),
+                              Icon(Icons.info_outline,
+                                  color: at.textSecondary, size: 18),
                               const SizedBox(width: 10),
                               Text('No delivery drivers found',
-                                  style: AdminTheme.label(13)),
+                                  style: at.label(13)),
                             ]),
                           );
                         }
@@ -424,12 +431,12 @@ class _AdminOrderCard extends StatelessWidget {
                               decoration: BoxDecoration(
                                 color: isSel
                                     ? AdminTheme.gold.withValues(alpha: 0.1)
-                                    : AdminTheme.card,
+                                    : at.card,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                     color: isSel
                                         ? AdminTheme.gold
-                                        : AdminTheme.cardBorder,
+                                        : at.cardBorder,
                                     width: isSel ? 1.5 : 1),
                               ),
                               child: Row(children: [
@@ -452,12 +459,12 @@ class _AdminOrderCard extends StatelessWidget {
                                             CrossAxisAlignment.start,
                                         children: [
                                       Text(dName,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.w700,
-                                              color: AdminTheme.textPrimary)),
+                                              color: at.textPrimary)),
                                       Text(dd['phone'] ?? '',
-                                          style: AdminTheme.label(11)),
+                                          style: at.label(11)),
                                     ])),
                                 Container(
                                     width: 8,
@@ -465,7 +472,7 @@ class _AdminOrderCard extends StatelessWidget {
                                     decoration: BoxDecoration(
                                         color: online
                                             ? AdminTheme.emerald
-                                            : AdminTheme.textMuted,
+                                            : at.textMuted,
                                         shape: BoxShape.circle)),
                                 const SizedBox(width: 5),
                                 Text(online ? 'Online' : 'Offline',
@@ -474,7 +481,7 @@ class _AdminOrderCard extends StatelessWidget {
                                         fontWeight: FontWeight.w600,
                                         color: online
                                             ? AdminTheme.emerald
-                                            : AdminTheme.textMuted)),
+                                            : at.textMuted)),
                                 if (isSel) ...[
                                   const SizedBox(width: 8),
                                   const Icon(Icons.check_circle_rounded,
@@ -488,7 +495,7 @@ class _AdminOrderCard extends StatelessWidget {
                     ),
 
                     const SizedBox(height: 16),
-                    Text('Update Status', style: AdminTheme.heading(15)),
+                    Text('Update Status', style: at.heading(15)),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
@@ -503,12 +510,12 @@ class _AdminOrderCard extends StatelessWidget {
                                   decoration: BoxDecoration(
                                     color: selStatus == s
                                         ? statusColor(s).withValues(alpha: 0.2)
-                                        : AdminTheme.card,
+                                        : at.card,
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
                                         color: selStatus == s
                                             ? statusColor(s)
-                                            : AdminTheme.cardBorder,
+                                            : at.cardBorder,
                                         width: selStatus == s ? 1.5 : 1),
                                   ),
                                   child: Text(s.toUpperCase(),
@@ -517,7 +524,7 @@ class _AdminOrderCard extends StatelessWidget {
                                           fontWeight: FontWeight.w800,
                                           color: selStatus == s
                                               ? statusColor(s)
-                                              : AdminTheme.textSecondary)),
+                                              : at.textSecondary)),
                                 ),
                               ))
                           .toList(),
@@ -535,12 +542,17 @@ class _AdminOrderCard extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(14)),
                             elevation: 0),
                         onPressed: () async {
+                          final resolvedStatus = selDriverId != null && selStatus == 'pending'
+                              ? 'assigned'
+                              : selStatus;
                           final upd = <String, dynamic>{
-                            'status':
-                                selDriverId != null && selStatus == 'pending'
-                                    ? 'assigned'
-                                    : selStatus,
+                            'status': resolvedStatus,
                             'updatedAt': FieldValue.serverTimestamp(),
+                            'statusHistory': FieldValue.arrayUnion([{
+                              'status': resolvedStatus,
+                              'note': 'Updated by admin',
+                              'timestamp': DateTime.now().toIso8601String(),
+                            }]),
                           };
                           if (selDriverId != null) {
                             upd['driverId'] = selDriverId;
@@ -551,12 +563,32 @@ class _AdminOrderCard extends StatelessWidget {
                               .doc(orderId)
                               .update(upd);
 
+                          // Fire local notification on admin's device
+                          NotificationService().showOrderNotification(
+                            title: '✅ Order Updated',
+                            body: 'Order #${orderId.substring(0, 6).toUpperCase()} → $resolvedStatus',
+                            orderId: orderId,
+                          );
+                          // Notify assigned delivery agent
+                          if (selDriverId != null) {
+                            final body2 = 'You have a new order! Order #${orderId.substring(0, 6).toUpperCase()} has been assigned to you. Open the app to accept.';
+                            await db.collection('notifications').add({
+                              'title': '🚴 New Order Assigned!',
+                              'message': body2,
+                              'body': body2,
+                              'userId': selDriverId,
+                              'orderId': orderId,
+                              'type': 'order_assigned',
+                              'createdAt': FieldValue.serverTimestamp(),
+                              'isRead': false,
+                            });
+                          }
                           // Notify customer
                           if (d['userId'] != null) {
+                            final customerBody = 'Your order #${orderId.substring(0, 6).toUpperCase()} has been updated to $selStatus';
                             await db.collection('notifications').add({
                               'title': 'Order Update',
-                              'message':
-                                  'Your order #${orderId.substring(0, 6).toUpperCase()} has been updated to $selStatus',
+                              'message': customerBody,
                               'userId': d['userId'],
                               'targetGroup': 'user',
                               'orderId': orderId,
@@ -564,6 +596,20 @@ class _AdminOrderCard extends StatelessWidget {
                               'createdAt': FieldValue.serverTimestamp(),
                               'isRead': false,
                             });
+                            // Send status update email to customer
+                            try {
+                              final custDoc = await db.collection('users').doc(d['userId']).get();
+                              final custEmail = custDoc.data()?['email'] as String? ?? '';
+                              final custName  = custDoc.data()?['name']  as String? ?? 'Customer';
+                              if (custEmail.isNotEmpty) {
+                                EmployeeNotificationService().sendOrderStatusEmail(
+                                  name: custName,
+                                  email: custEmail,
+                                  orderId: orderId,
+                                  newStatus: selStatus,
+                                );
+                              }
+                            } catch (_) {}
                           }
 
                           if (ctx2.mounted) Navigator.pop(ctx2);
@@ -582,27 +628,32 @@ class _AdminOrderCard extends StatelessWidget {
     );
   }
 
-  Widget _section(String title, List<Widget> rows) => Container(
+  Widget _section(BuildContext ctx, String title, List<Widget> rows) {
+    final at = DynAdmin.of(ctx);
+    return Container(
         padding: const EdgeInsets.all(16),
-        decoration: AdminTheme.cardDecoration(),
+        decoration: at.cardDecoration(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title,
-              style: AdminTheme.heading(13)
-                  .copyWith(color: AdminTheme.textSecondary)),
+              style: at.heading(13)
+                  .copyWith(color: at.textSecondary)),
           const SizedBox(height: 12),
           ...rows,
-        ]),
-      );
-  Widget _row(String label, String value) => Padding(
+        ]));
+  }
+  Widget _row(BuildContext context, String label, String value) {
+    final at = DynAdmin.of(context);
+    return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 80, child: Text(label, style: AdminTheme.label(12))),
+          SizedBox(width: 80, child: Text(label, style: at.label(12))),
           Expanded(
               child: Text(value,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AdminTheme.textPrimary))),
+                      color: at.textPrimary))),
         ]),
       );
+  }
 }

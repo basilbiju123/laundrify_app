@@ -376,7 +376,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
     }
 
     return GestureDetector(
-      onTap: () => _downloadBill(context, order),
+      onTap: () => _showInvoiceSheet(context, order),
       child: Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -524,7 +524,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               ]),
               const Spacer(),
               GestureDetector(
-                onTap: () => _downloadBill(context, order),
+                onTap: () => _showInvoiceSheet(context, order),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
@@ -742,9 +742,474 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
     );
   }
 
-  // ════════════════════════════════════════════════════════════
-  //  PDF BILL GENERATOR
-  // ════════════════════════════════════════════════════════════
+  // ── Invoice popup sheet ────────────────────────────────────
+  void _showInvoiceSheet(BuildContext context, Map<String, dynamic> order) {
+    final t = AppColors.of(context);
+    final orderId = (order['orderId'] ?? order['id'] ?? '') as String;
+    final displayId = orderId.length >= 8
+        ? orderId.substring(0, 8).toUpperCase()
+        : orderId.toUpperCase();
+    final services = (order['services'] as List? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final status = (order['status'] ?? 'pending') as String;
+
+    // Compute totals
+    double computedSubtotal = 0;
+    for (final svc in services) {
+      for (final item in (svc['items'] as List? ?? [])) {
+        final m = item as Map;
+        computedSubtotal +=
+            ((m['qty'] as int? ?? 0) * (m['price'] as num? ?? 0));
+      }
+    }
+    final subtotal =
+        ((order['subtotal'] as num?)?.toDouble() ?? 0) > 0
+            ? (order['subtotal'] as num).toDouble()
+            : computedSubtotal;
+    final delivery = (order['deliveryFee'] as num? ?? 0).toDouble();
+    final gst = (order['gst'] as num? ?? 0).toDouble();
+    final couponDiscount = (order['couponDiscount'] as num? ?? 0).toDouble();
+    final couponCode = order['couponCode'] as String?;
+    final originalTotal = (order['originalTotal'] as num?)?.toDouble();
+    final total =
+        ((order['total'] ?? order['totalAmount'] ?? order['grandTotal'] ?? 0)
+                as num)
+            .toDouble();
+    final payMethod = (order['paymentMethod'] ?? 'N/A') as String;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.92,
+        maxChildSize: 0.97,
+        minChildSize: 0.5,
+        builder: (ctx, sc) => Container(
+          decoration: BoxDecoration(
+            color: t.bg,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // ── Top bar with download button ──────────────
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 14, 16, 0),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                  border: Border(bottom: BorderSide(color: t.cardBdr)),
+                ),
+                child: Column(children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(
+                          color: t.cardBdr,
+                          borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  Row(children: [
+                    // Close button
+                    GestureDetector(
+                      onTap: () => Navigator.pop(ctx),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                            color: t.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: t.cardBdr)),
+                        child: Icon(Icons.close_rounded,
+                            size: 18, color: t.textDim),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('Invoice',
+                            style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: t.textHi)),
+                        Text('#$displayId',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: t.textDim,
+                                fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                    // Download PDF button
+                    GestureDetector(
+                      onTap: () => _downloadBill(ctx, order),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                                colors: [_hNavy, _hNMid],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: _hNavy.withValues(alpha: 0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3))
+                            ]),
+                        child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.download_rounded,
+                                  color: _hGold, size: 16),
+                              SizedBox(width: 6),
+                              Text('Download PDF',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 12)),
+                            ]),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 14),
+                ]),
+              ),
+
+              // ── Invoice body ──────────────────────────────
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: sc,
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    // Brand header
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                              colors: [_hNavy, _hNMid],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight),
+                          borderRadius: BorderRadius.circular(16)),
+                      child: Row(children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                              color: _hGold.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: const Icon(
+                              Icons.local_laundry_service_rounded,
+                              color: _hGold,
+                              size: 24),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const Text('LAUNDRIFY',
+                                style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                    color: _hGold,
+                                    letterSpacing: 2)),
+                            Text('Professional Laundry Service',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white
+                                        .withValues(alpha: 0.6))),
+                          ]),
+                        ),
+                        _statusBadge(status),
+                      ]),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Order meta
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                          color: t.card,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: t.cardBdr)),
+                      child: Column(children: [
+                        _invoiceMetaRow(t, 'Order ID', '#$displayId'),
+                        _dividerLine(t),
+                        _invoiceMetaRow(
+                            t,
+                            'Date',
+                            '${order['orderDate'] ?? ''} ${order['orderTime'] ?? ''}'),
+                        _dividerLine(t),
+                        _invoiceMetaRow(
+                            t, 'Payment', payMethod.toUpperCase()),
+                        _dividerLine(t),
+                        _invoiceMetaRow(
+                            t,
+                            'Pickup',
+                            '${order['pickupDate'] ?? ''} ${order['pickupTime'] ?? ''}'),
+                        if ((order['deliveryDate'] ?? '').isNotEmpty) ...[
+                          _dividerLine(t),
+                          _invoiceMetaRow(
+                              t,
+                              'Delivery',
+                              '${order['deliveryDate']} ${order['deliveryTime'] ?? ''}'),
+                        ],
+                        if ((order['address'] ?? '').isNotEmpty) ...[
+                          _dividerLine(t),
+                          _invoiceMetaRow(
+                              t, 'Address', order['address'] as String),
+                        ],
+                      ]),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Services & items
+                    ...services.map((svc) {
+                      final sName =
+                          (svc['serviceName'] ?? svc['title'] ?? '') as String;
+                      final items = (svc['items'] as List? ?? [])
+                          .where((i) => ((i as Map)['qty'] ?? 0) > 0)
+                          .toList();
+                      if (items.isEmpty) return const SizedBox.shrink();
+                      final accent = _hAccent(sName);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                            color: t.card,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: t.cardBdr)),
+                        child: Column(children: [
+                          // Service header
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                                color: accent.withValues(alpha: 0.08),
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(14))),
+                            child: Row(children: [
+                              Icon(_hIcon(sName), color: accent, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                  child: Text(sName,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w800,
+                                          color: t.textHi))),
+                              Text(
+                                  '₹${items.fold<double>(0, (s, i) => s + ((i as Map)['qty'] as int) * ((i)['price'] as num)).toStringAsFixed(0)}',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900,
+                                      color: accent)),
+                            ]),
+                          ),
+                          // Item rows
+                          ...items.asMap().entries.map((e) {
+                            final i = e.key;
+                            final item = e.value as Map;
+                            final qty = item['qty'] as int;
+                            final price = (item['price'] as num).toInt();
+                            return Column(children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
+                                child: Row(children: [
+                                  Expanded(
+                                      child: Text(
+                                          item['name']?.toString() ?? '',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: t.textHi,
+                                              fontWeight:
+                                                  FontWeight.w600))),
+                                  Text('$qty ×',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: t.textDim)),
+                                  const SizedBox(width: 4),
+                                  Text('₹$price',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: t.textDim)),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                      '₹${(qty * price).toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w800,
+                                          color: t.textHi)),
+                                ]),
+                              ),
+                              if (i < items.length - 1)
+                                Divider(
+                                    height: 1,
+                                    indent: 14,
+                                    endIndent: 14,
+                                    color: t.cardBdr),
+                            ]);
+                          }),
+                        ]),
+                      );
+                    }),
+
+                    // Bill breakdown
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                          color: t.card,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: t.cardBdr)),
+                      child: Column(children: [
+                        _billLine(t, 'Subtotal',
+                            '₹${subtotal.toStringAsFixed(0)}'),
+                        const SizedBox(height: 8),
+                        _billLine(t, 'Delivery Fee',
+                            '₹${delivery.toStringAsFixed(0)}'),
+                        const SizedBox(height: 8),
+                        _billLine(t, 'GST (5%)',
+                            '₹${gst.toStringAsFixed(0)}'),
+                        if (couponDiscount > 0) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(children: [
+                                  const Icon(Icons.local_offer_rounded,
+                                      size: 13, color: _hGreen),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                      'Coupon Discount${couponCode != null ? ' ($couponCode)' : ''}',
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          color: _hGreen,
+                                          fontWeight: FontWeight.w600)),
+                                ]),
+                                Text(
+                                    '−₹${couponDiscount.toStringAsFixed(0)}',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: _hGreen)),
+                              ]),
+                        ],
+                        Divider(height: 20, color: t.cardBdr),
+                        Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                          Text('Total Paid',
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: t.textHi)),
+                          Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                            if (couponDiscount > 0 &&
+                                originalTotal != null) ...[
+                              Text(
+                                  '₹${originalTotal.toStringAsFixed(0)}',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: t.textDim,
+                                      decoration:
+                                          TextDecoration.lineThrough)),
+                            ],
+                            Text('₹${total.toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900,
+                                    color: _hGold)),
+                          ]),
+                        ]),
+                        if (couponDiscount > 0) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                                color: _hGreen.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                    color: _hGreen.withValues(alpha: 0.2))),
+                            child: Row(children: [
+                              const Icon(Icons.savings_rounded,
+                                  color: _hGreen, size: 14),
+                              const SizedBox(width: 6),
+                              Text(
+                                  'You saved ₹${couponDiscount.toStringAsFixed(0)} on this order!',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: _hGreen)),
+                            ]),
+                          ),
+                        ],
+                      ]),
+                    ),
+                    const SizedBox(height: 30),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _invoiceMetaRow(dynamic t, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+            width: 90,
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: (t as dynamic).textDim,
+                    fontWeight: FontWeight.w600))),
+        Expanded(
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: (t as dynamic).textHi,
+                    fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
+
+  Widget _dividerLine(dynamic t) =>
+      Divider(height: 1, color: (t as dynamic).cardBdr);
+
+  Widget _billLine(dynamic t, String label, String value) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: (t as dynamic).textMid)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: (t as dynamic).textHi)),
+        ],
+      );
+
+  // ── PDF download ────────────────────────────────────────────
   Future<void> _downloadBill(
       BuildContext context, Map<String, dynamic> order) async {
     // Show loading snackbar
@@ -789,8 +1254,10 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
     final subtotal = storedSubtotal > 0 ? storedSubtotal : computedSubtotal;
     final delivery = (order['deliveryFee'] as num? ?? 0).toDouble();
     final gst = (order['gst'] as num? ?? 0).toDouble();
+    final couponDiscount = (order['couponDiscount'] as num? ?? 0).toDouble();
+    final couponCode = order['couponCode'] as String?;
     final storedTotal = (order['total'] ?? order['totalAmount'] ?? order['grandTotal'] ?? 0 as num).toDouble();
-    final total = storedTotal > 0 ? storedTotal : (subtotal + delivery + gst);
+    final total = storedTotal > 0 ? storedTotal : (subtotal + delivery + gst - couponDiscount).clamp(0, double.infinity);
 
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -1073,6 +1540,24 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                 "Delivery Fee", "₹${delivery.toStringAsFixed(2)}", font, bold),
             pw.SizedBox(height: 8),
             _pdfBillRow("GST (5%)", "₹${gst.toStringAsFixed(2)}", font, bold),
+            if (couponDiscount > 0) ...[
+              pw.SizedBox(height: 8),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "Coupon Discount${couponCode != null ? ' ($couponCode)' : ''}",
+                    style: pw.TextStyle(
+                        font: font, fontSize: 11, color: PdfColor.fromHex('#10B981')),
+                  ),
+                  pw.Text(
+                    "−₹${couponDiscount.toStringAsFixed(2)}",
+                    style: pw.TextStyle(
+                        font: bold, fontSize: 11, color: PdfColor.fromHex('#10B981')),
+                  ),
+                ],
+              ),
+            ],
             pw.SizedBox(height: 10),
             pw.Divider(color: PdfColors.grey300, thickness: 0.5),
             pw.SizedBox(height: 10),
@@ -1103,6 +1588,21 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
         // ── FOOTER ───────────────────────────────────────────
         pw.Center(
           child: pw.Column(children: [
+            if (couponDiscount > 0) ...[
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                margin: const pw.EdgeInsets.only(bottom: 14),
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromHex('#F0FDF4'),
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: PdfColor.fromHex('#10B981'), width: 0.5),
+                ),
+                child: pw.Text(
+                  "🎉 You saved ₹${couponDiscount.toStringAsFixed(0)} with coupon${couponCode != null ? ' $couponCode' : ''}!",
+                  style: pw.TextStyle(font: bold, fontSize: 11, color: PdfColor.fromHex('#059669')),
+                ),
+              ),
+            ],
             pw.Divider(color: PdfColors.grey200, thickness: 0.5),
             pw.SizedBox(height: 10),
             pw.Text("Thank you for choosing Laundrify!",

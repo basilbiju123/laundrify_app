@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import '../services/notification_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/employee_notification_service.dart';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform, kIsWeb;
 import 'otp_page.dart';
+import '../services/auth_service.dart';
 import 'email_verification_page.dart';
 import 'login_page.dart';
 import 'dart:math' as math;
@@ -106,6 +109,12 @@ class _SignupPageState extends State<SignupPage> with TickerProviderStateMixin {
 
       await user.sendEmailVerification();
 
+      // Send welcome email via EmailJS
+      EmployeeNotificationService().notifyNewCustomer(
+        name: _nameCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+      );
+
       if (!mounted) return;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => const EmailVerificationPage()));
@@ -139,25 +148,36 @@ class _SignupPageState extends State<SignupPage> with TickerProviderStateMixin {
       return;
     }
     setState(() => _isLoading = true);
-    try {
-      await Future.delayed(const Duration(milliseconds: 400));
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => OtpPage(
-            phone: _phoneCtrl.text.trim(),
-            name: _nameCtrl.text.trim(),
-            email: '',
-            password: '',
+    final phone = _phoneCtrl.text.trim();
+    final formattedPhone = phone.startsWith('+') ? phone : '+91$phone';
+    await AuthService().verifyPhoneNumber(
+      phoneNumber: formattedPhone,
+      onCodeSent: (verificationId) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OtpPage(
+              phone: formattedPhone,
+              verificationId: verificationId,
+              name: _nameCtrl.text.trim(),
+            ),
           ),
-        ),
-      );
-    } catch (_) {
-      if (mounted) _snack('Could not send OTP. Try again.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+        );
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _snack(error, isError: true);
+      },
+      onAutoVerify: (user) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        NotificationService().initialize();
+        Navigator.pushReplacementNamed(context, '/role-redirect');
+      },
+    );
   }
 
   void _snack(String msg, {required bool isError}) {
@@ -867,6 +887,7 @@ class _SignupPageState extends State<SignupPage> with TickerProviderStateMixin {
     List<TextInputFormatter>? formatters,
   }) =>
       TextFormField(
+        key: ValueKey('field_$label'),
         controller: ctrl,
         keyboardType: keyboard,
         obscureText: obscure,

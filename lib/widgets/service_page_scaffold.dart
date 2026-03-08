@@ -2,6 +2,54 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
+// ── Item image URLs (CDN/network for web, asset path for mobile) ─────────────
+// Maps item name keywords → public image URL (used on web)
+// On mobile, Image.asset loads from assets/images/items/
+const Map<String, String> _itemNetworkImages = {
+  'shirt':        'https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=200&q=80',
+  't-shirt':      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=200&q=80',
+  'tshirt':       'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=200&q=80',
+  'pant':         'https://images.unsplash.com/photo-1542272604-787c3835535d?w=200&q=80',
+  'jeans':        'https://images.unsplash.com/photo-1542272604-787c3835535d?w=200&q=80',
+  'saree':        'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=200&q=80',
+  'party wear':   'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=200&q=80',
+  'wedding':      'https://images.unsplash.com/photo-1519657337289-077653f724ed?w=200&q=80',
+  'kurta':        'https://images.unsplash.com/photo-1563306406-e66174fa3787?w=200&q=80',
+  'jacket':       'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200&q=80',
+  'coat':         'https://images.unsplash.com/photo-1548883354-94bcfe321cbb?w=200&q=80',
+  'suit':         'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=200&q=80',
+  'trouser':      'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=200&q=80',
+  'shorts':       'https://images.unsplash.com/photo-1591195853828-11db59a44f43?w=200&q=80',
+  'dress':        'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=200&q=80',
+  'blanket':      'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=200&q=80',
+  'bedsheet':     'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=200&q=80',
+  'pillow':       'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=200&q=80',
+  'towel':        'https://images.unsplash.com/photo-1563291074-2bf8677ac0e5?w=200&q=80',
+  'shoe':         'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200&q=80',
+  'sneaker':      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200&q=80',
+  'boot':         'https://images.unsplash.com/photo-1608256246200-53e635b5b65f?w=200&q=80',
+  'bag':          'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=200&q=80',
+  'handbag':      'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=200&q=80',
+  'backpack':     'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=200&q=80',
+  'carpet':       'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&q=80',
+  'rug':          'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&q=80',
+  'curtain':      'https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=200&q=80',
+  'sofa':         'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=200&q=80',
+  'sweater':      'https://images.unsplash.com/photo-1584670747417-594a9412feba?w=200&q=80',
+  'hoodie':       'https://images.unsplash.com/photo-1556821840-3a63f15732ce?w=200&q=80',
+  'lehenga':      'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=200&q=80',
+  'salwar':       'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=200&q=80',
+  'dupatta':      'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=200&q=80',
+};
+
+String? _networkImageFor(String itemName) {
+  final lower = itemName.toLowerCase();
+  for (final entry in _itemNetworkImages.entries) {
+    if (lower.contains(entry.key)) return entry.value;
+  }
+  return null;
+}
+
 /// A fully responsive service-page scaffold.
 /// • Mobile  : standard AppBar + ListView + bottom checkout bar
 /// • Web/Wide : side panel (service info + checkout) + scrollable item grid
@@ -92,7 +140,7 @@ class ServicePageScaffold extends StatelessWidget {
       IconData? iconData, String? category, bool hasItems, int index) {
     return Row(
       children: [
-        _itemThumbnail(context, imagePath, iconData, hasItems, size: 72),
+        _itemThumbnail(context, imagePath, iconData, hasItems, size: 72, itemName: name),
         const SizedBox(width: 12),
         Expanded(child: _itemInfo(context, name, price, qty, category, hasItems)),
         const SizedBox(width: 8),
@@ -108,7 +156,7 @@ class ServicePageScaffold extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _itemThumbnail(context, imagePath, iconData, hasItems, size: 60, fullWidth: true),
+        _itemThumbnail(context, imagePath, iconData, hasItems, size: 60, fullWidth: true, itemName: name),
         const SizedBox(height: 8),
         Text(name,
             maxLines: 2,
@@ -131,15 +179,62 @@ class ServicePageScaffold extends StatelessWidget {
   }
 
   Widget _itemThumbnail(BuildContext context, String? imagePath, IconData? iconData, bool hasItems,
-      {double size = 72, bool fullWidth = false}) {
+      {double size = 72, bool fullWidth = false, String? itemName}) {
     final t = AppColors.of(context);
+
+    // Determine the best image source
     Widget child;
-    if (imagePath != null) {
-      child = Image.asset(imagePath,
+    final networkUrl = itemName != null ? _networkImageFor(itemName) : null;
+
+    if (kIsWeb) {
+      // Web: use network image (assets don't always resolve on web deploys)
+      if (networkUrl != null) {
+        child = Image.network(
+          networkUrl,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor));
+          loadingBuilder: (_, child, progress) =>
+              progress == null ? child : Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor),
+          errorBuilder: (_, __, ___) =>
+              Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor),
+        );
+      } else if (imagePath != null) {
+        child = Image.network(
+          imagePath, // might be a URL already
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) =>
+              Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor),
+        );
+      } else {
+        child = Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor);
+      }
     } else {
-      child = Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor);
+      // Mobile: use asset image with network fallback
+      if (imagePath != null) {
+        child = Image.asset(
+          imagePath,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) {
+            // Asset failed, try network
+            if (networkUrl != null) {
+              return Image.network(
+                networkUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor),
+              );
+            }
+            return Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor);
+          });
+      } else if (networkUrl != null) {
+        child = Image.network(
+          networkUrl,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) =>
+              Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor),
+        );
+      } else {
+        child = Icon(iconData ?? serviceIcon, size: size * 0.45, color: serviceColor);
+      }
     }
     return Container(
       height: size,

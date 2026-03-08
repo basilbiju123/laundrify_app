@@ -277,7 +277,14 @@ class _CouponsPageState extends State<CouponsPage>
     final t = AppColors.of(context);
     final discount = coupon['discount'];
     final discountType = coupon['discountType'];
-    final validUntil = coupon['validUntil'] as DateTime?;
+    // validUntil may be a Firestore Timestamp or a DateTime (from defaults)
+    final rawUntil = coupon['validUntil'];
+    DateTime? validUntil;
+    if (rawUntil is DateTime) {
+      validUntil = rawUntil;
+    } else if (rawUntil != null) {
+      try { validUntil = (rawUntil as dynamic).toDate() as DateTime; } catch (_) {}
+    }
     final daysLeft = validUntil?.difference(DateTime.now()).inDays ?? 0;
 
     final discountText = discountType == 'percentage'

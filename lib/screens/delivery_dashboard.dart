@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
+import 'package:geolocator/geolocator.dart' show Geolocator, LocationPermission, LocationAccuracy, LocationSettings;
 import 'auth_options_page.dart';
 import '../services/notification_service.dart';
 import '../services/panel_theme_service.dart';
@@ -93,7 +94,7 @@ Color _sColor(String s) {
     case 'rejected':
       return DD.danger;
     default:
-      return DD.textG;
+      return LTheme.textDim;
   }
 }
 
@@ -233,24 +234,30 @@ class _DeliveryDashboardState extends State<DeliveryDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final lt = DynTheme.of(context);
-    final scaffold = Scaffold(
-      backgroundColor: lt.bg,
-      body: IndexedStack(
-        index: _idx,
-        children: const [
-          _HomeTab(),
-          _OrdersTab(),
-          _EarningsTab(),
-          _ProfileTab(),
-        ],
-      ),
-      bottomNavigationBar: _BottomNav(
-        current: _idx,
-        onTap: (i) => setState(() => _idx = i),
+    return PanelThemeScope(
+      panelKey: 'delivery',
+      child: Builder(
+        builder: (ctx) {
+          final lt = DynTheme.of(ctx);
+          return Scaffold(
+            backgroundColor: lt.bg,
+            body: IndexedStack(
+              index: _idx,
+              children: const [
+                _HomeTab(),
+                _OrdersTab(),
+                _EarningsTab(),
+                _ProfileTab(),
+              ],
+            ),
+            bottomNavigationBar: _BottomNav(
+              current: _idx,
+              onTap: (i) => setState(() => _idx = i),
+            ),
+          );
+        },
       ),
     );
-    return PanelThemeScope(panelKey: 'delivery', child: scaffold);
   }
 }
 
@@ -261,6 +268,7 @@ class _BottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
     final items = [
       (Icons.home_rounded, Icons.home_outlined, 'Home'),
       (Icons.receipt_long_rounded, Icons.receipt_long_outlined, 'Orders'),
@@ -273,10 +281,10 @@ class _BottomNav extends StatelessWidget {
     ];
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1A2E),
+        color: lt.isDark ? const Color(0xFF0D1A2E) : lt.card,
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
+              color: Colors.black.withValues(alpha: lt.isDark ? 0.4 : 0.1),
               blurRadius: 20,
               offset: const Offset(0, -4))
         ],
@@ -305,7 +313,9 @@ class _BottomNav extends StatelessWidget {
                       Icon(active ? item.$1 : item.$2,
                           color: active
                               ? const Color(0xFF080F1E)
-                              : const Color(0xFF475569),
+                              : (lt.isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF334155)),
                           size: 22),
                       const SizedBox(height: 4),
                       Text(item.$3,
@@ -314,7 +324,9 @@ class _BottomNav extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                             color: active
                                 ? const Color(0xFF080F1E)
-                                : const Color(0xFF475569),
+                                : (lt.isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF334155)),
                           )),
                     ]),
                   ),
@@ -342,6 +354,7 @@ class _HomeTabState extends State<_HomeTab> {
   final _db = FirebaseFirestore.instance;
   bool _online = false, _toggling = false;
   String _driverName = '';
+  StreamSubscription<dynamic>? _locationSub;
 
   @override
   void initState() {
@@ -349,50 +362,106 @@ class _HomeTabState extends State<_HomeTab> {
     _initDriver();
   }
 
+  @override
+  void dispose() {
+    _locationSub?.cancel();
+    super.dispose();
+  }
+
+  /// Reads driver doc from /delivery_agents (not /users).
   Future<void> _initDriver() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
     try {
-      final doc = await _db.collection('users').doc(uid).get();
-      if (!doc.exists) {
-        await _db.collection('users').doc(uid).set({
-          'name': _auth.currentUser?.displayName ?? 'Driver',
-          'phone': _auth.currentUser?.phoneNumber ?? '',
-          'email': _auth.currentUser?.email ?? '',
-          'isOnline': false,
-          'rating': 5.0,
-          'totalDeliveries': 0,
-          'vehicleNo': '',
-          'earnings': 0.0,
-          'createdAt': FieldValue.serverTimestamp(),
+      final doc = await _db.collection('delivery_agents').doc(uid).get();
+      if (doc.exists && mounted) {
+        setState(() {
+          _online = doc.data()?['isOnline'] ?? false;
+          _driverName = doc.data()?['name'] ??
+              _auth.currentUser?.displayName ?? 'Driver';
         });
-      } else {
-        if (mounted) {
-          setState(() {
-            _online = doc.data()?['isOnline'] ?? false;
-            _driverName = doc.data()?['name'] ??
-                _auth.currentUser?.displayName ??
-                'Driver';
-          });
-        }
+        // Resume GPS streaming if they were online
+        if (_online) _startLocationUpdates(uid);
       }
     } catch (e) {
-      debugPrint('Driver init error: $e');
+      debugPrint('Driver init error: \$e');
     }
   }
 
+  /// Toggle online/offline and start/stop GPS streaming.
   Future<void> _toggleOnline() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null || _toggling) return;
     setState(() => _toggling = true);
     try {
       final newStatus = !_online;
-      await _db.collection('users').doc(uid).update(
-          {'isOnline': newStatus, 'lastSeen': FieldValue.serverTimestamp()});
+      await _db.collection('delivery_agents').doc(uid).update({
+        'isOnline': newStatus,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
       if (mounted) setState(() => _online = newStatus);
+      if (newStatus) {
+        _startLocationUpdates(uid);
+      } else {
+        _locationSub?.cancel();
+        _locationSub = null;
+        // Clear location when going offline
+        await _db.collection('delivery_agents').doc(uid).update({
+          'currentLat': FieldValue.delete(),
+          'currentLng': FieldValue.delete(),
+        });
+      }
     } catch (_) {
     } finally {
       if (mounted) setState(() => _toggling = false);
+    }
+  }
+
+  /// Streams GPS position every 10 seconds to /delivery_agents/{uid}.
+  /// Uses geolocator — already in pubspec, 100% free, no API key.
+  Future<void> _startLocationUpdates(String uid) async {
+    _locationSub?.cancel();
+    try {
+      // Check/request permission
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.deniedForever ||
+          perm == LocationPermission.denied) { return; }
+
+      const settings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 20, // update every 20 metres moved
+      );
+
+      _locationSub = Geolocator.getPositionStream(locationSettings: settings)
+          .listen((pos) async {
+        try {
+          // Update driver's own location doc
+          await _db.collection('delivery_agents').doc(uid).update({
+            'currentLat': pos.latitude,
+            'currentLng': pos.longitude,
+            'locationUpdatedAt': FieldValue.serverTimestamp(),
+          });
+          // Also update active order doc so customer can track in real-time
+          final activeOrders = await _db
+              .collection('orders')
+              .where('driverId', isEqualTo: uid)
+              .where('status', whereIn: ['out_for_delivery', 'pickup', 'assigned', 'accepted'])
+              .limit(1)
+              .get();
+          if (activeOrders.docs.isNotEmpty) {
+            await activeOrders.docs.first.reference.update({
+              'currentLat': pos.latitude,
+              'currentLng': pos.longitude,
+              'locationUpdatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (_) {}
+      });
+    } catch (e) {
+      debugPrint('Location stream error: \$e');
     }
   }
 
@@ -581,7 +650,7 @@ class _HomeTabState extends State<_HomeTab> {
               child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('New Assignments', style: DD.h(16)),
+                    Text('New Assignments', style: DD.h(16, c: lt.textHi)),
                     TextButton(
                       onPressed: () => Navigator.push(
                           context,
@@ -642,7 +711,7 @@ class _HomeTabState extends State<_HomeTab> {
             SliverToBoxAdapter(
                 child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-              child: Text('Active Orders', style: DD.h(16)),
+              child: Text('Active Orders', style: DD.h(16, c: lt.textHi)),
             )),
 
             uid == null
@@ -722,6 +791,55 @@ class _OrderCardState extends State<_OrderCard> {
   bool _loading = false;
 
   Future<void> _update(String newStatus) async {
+    final lt = DynTheme.of(context);
+    // For COD orders being marked delivered → confirm cash collected
+    if (newStatus == 'delivered' || newStatus == 'completed') {
+      final paymentMethod = widget.data['paymentMethod'] ?? '';
+      final isCod = paymentMethod == 'cod' || paymentMethod == 'cash_on_delivery';
+      if (isCod) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: lt.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            title: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: DynTheme.gold.withValues(alpha: lt.isDark ? 0.18 : 0.08), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.payments_rounded, color: DD.gold, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Text('Confirm Cash', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            ]),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('This is a Cash on Delivery order.', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(
+                'Amount: ₹\${((widget.data[\'totalAmount\'] ?? widget.data[\'total\'] ?? 0) as num).toStringAsFixed(0)}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: DD.gold),
+              ),
+              const SizedBox(height: 8),
+              Text('Have you collected the cash from the customer?',
+                  style: TextStyle(fontSize: 13, color: lt.textMid)),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Not Yet', style: TextStyle(color: DD.danger)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: DD.success, foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: const Text('Yes, Collected ✓', style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
+    }
     setState(() => _loading = true);
     try {
       final upd = <String, dynamic>{
@@ -730,20 +848,35 @@ class _OrderCardState extends State<_OrderCard> {
       };
       if (newStatus == 'completed' || newStatus == 'delivered') {
         upd['completedAt'] = FieldValue.serverTimestamp();
+        // Mark payment as collected for COD
+        final paymentMethod = widget.data['paymentMethod'] ?? '';
+        if (paymentMethod == 'cod' || paymentMethod == 'cash_on_delivery') {
+          upd['paymentStatus'] = 'paid';
+          upd['cashCollectedAt'] = FieldValue.serverTimestamp();
+        }
       }
       await _db.collection('orders').doc(widget.orderId).update(upd);
       // Also notify via notifications collection
+      final customerId1 = widget.data['userId'] ?? widget.data['customerId'] ?? '';
       await _db.collection('notifications').add({
         'title': 'Order ${_sLabel(newStatus)}',
         'message':
             'Order #${widget.orderId.substring(0, 6).toUpperCase()} status updated to ${_sLabel(newStatus)}',
         'targetGroup': 'users',
         'orderId': widget.orderId,
-        'userId': widget.data['userId'] ?? widget.data['customerId'] ?? '',
+        'userId': customerId1,
         'type': 'order_update',
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
+      if (customerId1.isNotEmpty) {
+        await NotificationService.sendPushToUser(
+          userId: customerId1,
+          title: 'Order ${_sLabel(newStatus)} 📦',
+          message: 'Your order #${widget.orderId.substring(0, 6).toUpperCase()} is now ${_sLabel(newStatus)}',
+          data: {'type': 'order_update', 'orderId': widget.orderId},
+        );
+      }
       if (mounted) _snack('Status: ${_sLabel(newStatus)}', false);
     } catch (e) {
       if (mounted) _snack('Error: $e', true);
@@ -778,14 +911,41 @@ class _OrderCardState extends State<_OrderCard> {
   void _maps() async {
     final d = widget.data;
     final status = d['status'] ?? '';
-    final addr = (status == 'picked' || status == 'out_for_delivery')
-        ? (d['deliveryAddress'] ?? d['pickupAddress'] ?? '')
-        : (d['pickupAddress'] ?? '');
+
+    // Pick destination: delivery address after pickup, pickup address otherwise
+    String addr = (status == 'picked' || status == 'out_for_delivery' || status == 'delivery')
+        ? (d['deliveryAddress'] ?? d['address'] ?? d['pickupAddress'] ?? '')
+        : (d['pickupAddress'] ?? d['address'] ?? '');
     if (addr.isEmpty) return;
-    final uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(addr)}');
+
+    // Try coords first (lat/lng stored on order) for precise navigation
+    final lat = d['pickupLat'] ?? d['lat'] ?? d['latitude'];
+    final lng = d['pickupLng'] ?? d['lng'] ?? d['longitude'];
+
+    Uri uri;
+    if (lat != null && lng != null) {
+      // Turn-by-turn directions to exact coordinates — opens Google Maps / Waze / any nav app
+      // On Android this opens the native chooser (Google Maps, Waze, etc.)
+      // On iOS opens Apple Maps by default, or Google Maps if installed
+      uri = kIsWeb
+          ? Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving')
+          : Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    } else {
+      // Fallback: address-based directions (Google Maps directions, free, no API key)
+      uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(addr)}&travelmode=driving');
+    }
+
+    // Try native URI first (Android), fall back to https
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
+    } else {
+      // Fallback to web URL
+      final webUri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(addr)}&travelmode=driving');
+      if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
     }
   }
 
@@ -888,12 +1048,12 @@ class _OrderCardState extends State<_OrderCard> {
               if (status == 'assigned') ...[
                 Row(children: [
                   Expanded(
-                      child: _btn('Reject', DD.danger, DD.dLight,
+                      child: _btn('Reject', DD.danger, DynTheme.rose.withValues(alpha: lt.isDark ? 0.18 : 0.08),
                           _loading ? null : _reject)),
                   const SizedBox(width: 8),
                   Expanded(
                       flex: 2,
-                      child: _btn('Accept Order', DD.success, DD.sLight,
+                      child: _btn('Accept Order', DD.success, DynTheme.emerald.withValues(alpha: lt.isDark ? 0.18 : 0.08),
                           _loading ? null : () => _update('accepted'))),
                 ]),
               ] else if (canProgress) ...[
@@ -910,7 +1070,7 @@ class _OrderCardState extends State<_OrderCard> {
                       child: _btn(
                           _nextLabel(status),
                           DD.primary,
-                          DD.pLight,
+                          DynTheme.blue.withValues(alpha: lt.isDark ? 0.18 : 0.08),
                           _loading
                               ? null
                               : () => _update(_nextStatus(status)))),
@@ -1019,7 +1179,7 @@ class _OrdersTabState extends State<_OrdersTab>
       appBar: AppBar(
         backgroundColor: lt.card,
         elevation: 0,
-        title: Text('My Orders', style: DD.h(19)),
+        title: Text('My Orders', style: DD.h(19, c: lt.textHi)),
         bottom: TabBar(
           controller: _tabCtrl,
           isScrollable: true,
@@ -1109,7 +1269,7 @@ class _EarningsTab extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: lt.card,
         elevation: 0,
-        title: Text('My Earnings', style: DD.h(19)),
+        title: Text('My Earnings', style: DD.h(19, c: lt.textHi)),
       ),
       body: uid == null
           ? _emptyState(
@@ -1193,10 +1353,10 @@ class _EarningsTab extends StatelessWidget {
                     const SizedBox(height: 16),
                     Row(children: [
                       _earningCard('Today', '₹${today.toInt()}',
-                          '$todayCount orders', DD.success, DD.sLight),
+                          '$todayCount orders', DD.success, DynTheme.emerald.withValues(alpha: lt.isDark ? 0.18 : 0.08)),
                       const SizedBox(width: 12),
                       _earningCard('This Week', '₹${week.toInt()}',
-                          'Weekly total', DD.warning, DD.wLight),
+                          'Weekly total', DD.warning, DynTheme.amber.withValues(alpha: lt.isDark ? 0.18 : 0.08)),
                     ]),
                     const SizedBox(height: 20),
                     Align(
@@ -1222,7 +1382,7 @@ class _EarningsTab extends StatelessWidget {
                             Container(
                                 padding: const EdgeInsets.all(9),
                                 decoration: BoxDecoration(
-                                    color: DD.sLight, shape: BoxShape.circle),
+                                    color: DynTheme.emerald.withValues(alpha: lt.isDark ? 0.18 : 0.08), shape: BoxShape.circle),
                                 child: const Icon(Icons.check_circle_rounded,
                                     color: DD.success, size: 18)),
                             const SizedBox(width: 12),
@@ -1296,7 +1456,8 @@ class _ProfileTabState extends State<_ProfileTab> {
       return;
     }
     try {
-      final doc = await _db.collection('users').doc(uid).get();
+      // Driver profile lives in /delivery_agents, not /users
+      final doc = await _db.collection('delivery_agents').doc(uid).get();
       if (mounted) {
         setState(() {
           _driver = doc.data();
@@ -1309,14 +1470,16 @@ class _ProfileTabState extends State<_ProfileTab> {
   }
 
   Future<void> _logout() async {
-    // Unsubscribe FCM topics and clear token before signing out so Firestore
-    // listeners don't fire PERMISSION_DENIED after the auth state changes.
+    // Capture navigator before any async operation
+    final nav = Navigator.of(context);
     try {
-      await NotificationService().unsubscribeAllTopics();
+      await NotificationService().deleteToken();
     } catch (_) {}
-    await _auth.signOut();
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
+    nav.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
       (_) => false,
     );
@@ -1337,7 +1500,7 @@ class _ProfileTabState extends State<_ProfileTab> {
       appBar: AppBar(
           backgroundColor: lt.card,
           elevation: 0,
-          title: Text('My Profile', style: DD.h(19))),
+          title: Text('My Profile', style: DD.h(19, c: lt.textHi))),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: DD.primary))
           : SingleChildScrollView(
@@ -1455,13 +1618,15 @@ class _ProfileTabState extends State<_ProfileTab> {
     return Divider(height: 1, indent: 56, color: lt.cardBdr);
   }
 
-  Widget _infoRow(IconData icon, String label, String value) => Padding(
+  Widget _infoRow(IconData icon, String label, String value) {
+    final lt = DynTheme.of(context);
+    return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(children: [
           Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: DD.pLight, borderRadius: BorderRadius.circular(8)),
+                  color: DynTheme.blue.withValues(alpha: lt.isDark ? 0.18 : 0.08), borderRadius: BorderRadius.circular(8)),
               child: Icon(icon, color: DD.primary, size: 17)),
           const SizedBox(width: 14),
           Expanded(
@@ -1473,6 +1638,7 @@ class _ProfileTabState extends State<_ProfileTab> {
               ])),
         ]),
       );
+  }
 
   Widget _actionRow(
           IconData icon, String label, Color color, VoidCallback onTap) {
@@ -1516,24 +1682,95 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   bool _loading = false;
 
   Future<void> _updateStatus(String newStatus) async {
+    final lt = DynTheme.of(context);
+    // COD confirmation before marking delivered
+    if (['delivered', 'completed'].contains(newStatus)) {
+      final paymentMethod = (widget.initialData['paymentMethod'] ?? '');
+      final isCod = paymentMethod == 'cod' || paymentMethod == 'cash_on_delivery';
+      if (isCod) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: lt.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            title: Row(children: [
+              Container(padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: DynTheme.gold.withValues(alpha: lt.isDark ? 0.18 : 0.08), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.payments_rounded, color: DD.gold, size: 22)),
+              const SizedBox(width: 12),
+              const Text('Confirm Cash', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            ]),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('This is a Cash on Delivery order.', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(
+                'Amount: ₹\${((widget.initialData[\'totalAmount\'] ?? widget.initialData[\'total\'] ?? 0) as num).toStringAsFixed(0)}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: DD.gold),
+              ),
+              const SizedBox(height: 8),
+              Text('Have you collected the cash from the customer?',
+                  style: TextStyle(fontSize: 13, color: lt.textMid)),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Not Yet', style: TextStyle(color: DD.danger))),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(backgroundColor: DD.success, foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: const Text('Yes, Collected ✓', style: TextStyle(fontWeight: FontWeight.w800))),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
+    }
     setState(() => _loading = true);
     try {
+      final extraFields = <String, dynamic>{};
+      if (['delivered', 'completed'].contains(newStatus)) {
+        final pm = widget.initialData['paymentMethod'] ?? '';
+        if (pm == 'cod' || pm == 'cash_on_delivery') {
+          extraFields['paymentStatus'] = 'paid';
+          extraFields['cashCollectedAt'] = FieldValue.serverTimestamp();
+        }
+      }
       await _db.collection('orders').doc(widget.orderId).update({
         'status': newStatus,
         'updatedAt': FieldValue.serverTimestamp(),
         if (['delivered', 'completed'].contains(newStatus))
           'completedAt': FieldValue.serverTimestamp(),
+        ...extraFields,
+        'statusHistory': FieldValue.arrayUnion([{
+          'status': newStatus,
+          'note': 'Updated by delivery agent',
+          'timestamp': DateTime.now().toIso8601String(),
+        }]),
       });
+      final customerId2 = widget.initialData['userId'] ?? widget.initialData['customerId'] ?? '';
+      // Fire local notification on THIS device (delivery agent sees confirmation)
+      NotificationService().showDeliveryNotification(
+        title: 'Status Updated: ${_sLabel(newStatus)}',
+        body: 'Order #${widget.orderId.substring(0, 6).toUpperCase()} marked as ${_sLabel(newStatus)}',
+        orderId: widget.orderId,
+      );
       await _db.collection('notifications').add({
         'title': 'Order ${_sLabel(newStatus)}',
         'message':
             'Your order #${widget.orderId.substring(0, 6).toUpperCase()} is now ${_sLabel(newStatus)}',
-        'userId': widget.initialData['userId'] ?? widget.initialData['customerId'] ?? '',
+        'userId': customerId2,
         'orderId': widget.orderId,
         'type': 'order_update',
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
+      if (customerId2.isNotEmpty) {
+        await NotificationService.sendPushToUser(
+          userId: customerId2,
+          title: 'Order ${_sLabel(newStatus)} 📦',
+          message: 'Your order #${widget.orderId.substring(0, 6).toUpperCase()} is now ${_sLabel(newStatus)}',
+          data: {'type': 'order_update', 'orderId': widget.orderId},
+        );
+      }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -1551,12 +1788,17 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
-  void _maps(String address) async {
+  Future<void> _maps(String address) async {
     if (address.isEmpty) return;
-    final uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(address)}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
+    // Use Google Maps Directions — opens turn-by-turn nav (free, no API key)
+    final dirUri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(address)}&travelmode=driving');
+    // Try native Android navigation intent first
+    final nativeUri = Uri.parse('google.navigation:q=${Uri.encodeComponent(address)}&mode=d');
+    if (!kIsWeb && await canLaunchUrl(nativeUri)) {
+      await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+    } else if (await canLaunchUrl(dirUri)) {
+      await launchUrl(dirUri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
     }
   }
 
@@ -1702,6 +1944,17 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                               color: DD.primary)),
                     ]),
               ),
+              const SizedBox(height: 12),
+              // Map preview (OpenStreetMap, free, no API key)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _MapPreview(
+                  lat: d['pickupLat'] ?? d['lat'] ?? d['latitude'],
+                  lng: d['pickupLng'] ?? d['lng'] ?? d['longitude'],
+                  address: d['pickupAddress'] ?? d['deliveryAddress'] ?? d['address'] ?? '',
+                  onTap: () => _maps(d['pickupAddress'] ?? d['deliveryAddress'] ?? d['address'] ?? ''),
+                ),
+              ),
               const SizedBox(height: 16),
 
               // ORDER DETAILS
@@ -1803,7 +2056,7 @@ class AssignedOrdersPage extends StatelessWidget {
         leading: IconButton(
             icon: Icon(Icons.arrow_back_rounded, color: lt.textHi),
             onPressed: () => Navigator.pop(context)),
-        title: Text('Assigned Orders', style: DD.h(19)),
+        title: Text('Assigned Orders', style: DD.h(19, c: lt.textHi)),
       ),
       body: uid == null
           ? _emptyState(
@@ -1861,7 +2114,7 @@ class DeliveryHistoryPage extends StatelessWidget {
         leading: IconButton(
             icon: Icon(Icons.arrow_back_rounded, color: lt.textHi),
             onPressed: () => Navigator.pop(context)),
-        title: Text('Delivery History', style: DD.h(19)),
+        title: Text('Delivery History', style: DD.h(19, c: lt.textHi)),
       ),
       body: uid == null
           ? _emptyState(
@@ -1901,7 +2154,7 @@ class DeliveryHistoryPage extends StatelessWidget {
                         Container(
                             padding: const EdgeInsets.all(9),
                             decoration: BoxDecoration(
-                                color: DD.sLight,
+                                color: DynTheme.emerald.withValues(alpha: lt.isDark ? 0.18 : 0.08),
                                 borderRadius: BorderRadius.circular(10)),
                             child: const Icon(Icons.check_circle_rounded,
                                 color: DD.success, size: 20)),
@@ -1936,4 +2189,101 @@ class DeliveryHistoryPage extends StatelessWidget {
             ),
     );
   }
+}
+
+// ─── Static Map Preview Widget (Free OpenStreetMap, No API Key) ──────────────
+class _MapPreview extends StatelessWidget {
+  final dynamic lat;
+  final dynamic lng;
+  final String address;
+  final VoidCallback onTap;
+
+  const _MapPreview({
+    required this.lat,
+    required this.lng,
+    required this.address,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lt = DynTheme.of(context);
+    // Build static map URL using OpenStreetMap (completely free, no API key)
+    String? mapUrl;
+    if (lat != null && lng != null) {
+      final latD = (lat is num) ? lat.toDouble() : double.tryParse(lat.toString());
+      final lngD = (lng is num) ? lng.toDouble() : double.tryParse(lng.toString());
+      if (latD != null && lngD != null && latD != 0.0 && lngD != 0.0) {
+        mapUrl = 'https://staticmap.openstreetmap.de/staticmap.php'
+            '?center=$latD,$lngD&zoom=15&size=400x160'
+            '&markers=$latD,$lngD,red-pushpin';
+      }
+    }
+
+    if (mapUrl == null && address.isEmpty) return const SizedBox.shrink();
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 140,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: lt.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: DD.border),
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Stack(children: [
+          if (mapUrl != null)
+            Image.network(
+              mapUrl,
+              width: double.infinity,
+              height: 140,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _fallback(),
+              loadingBuilder: (_, child, progress) =>
+                  progress == null ? child : _loading(),
+            )
+          else
+            _fallback(),
+          // Overlay: navigate button
+          Positioned(
+            bottom: 8, right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: DD.primary,
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8)],
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.navigation_rounded, color: Colors.white, size: 16),
+                SizedBox(width: 5),
+                Text('Navigate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+              ]),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _fallback() => Container(
+    color: const Color(0xFF1A2540),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.map_rounded, color: DD.gold, size: 32),
+      const SizedBox(height: 8),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Text(address, style: DD.t(12), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+      ),
+      const SizedBox(height: 6),
+      const Text('Tap to navigate', style: TextStyle(color: DD.gold, fontSize: 11, fontWeight: FontWeight.w600)),
+    ]),
+  );
+
+  Widget _loading() => Container(
+    color: const Color(0xFF1A2540),
+    child: const Center(child: CircularProgressIndicator(color: DD.gold, strokeWidth: 2)),
+  );
 }

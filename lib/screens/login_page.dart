@@ -7,6 +7,8 @@ import 'role_redirect_page.dart';
 import 'signup_page.dart';
 import 'forgot_password_page.dart';
 import 'otp_page.dart';
+import '../services/auth_service.dart';
+import '../services/notification_service.dart';
 import 'dart:math' as math;
 
 class LoginPage extends StatefulWidget {
@@ -63,15 +65,43 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  Future<void> _handleGoogleLogin() async {
+    setState(() => _isLoading = true);
+    try {
+      Map<String, dynamic> result;
+      if (kIsWeb) {
+        result = await AuthService().signInWithGoogleWeb();
+      } else if (_isDesktop) {
+        result = await AuthService().signInWithGoogleDesktop();
+      } else {
+        result = await AuthService().signInWithGoogle();
+      }
+      if (!mounted) return;
+      if (result['success'] == true) {
+        NotificationService().initialize();
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => const RoleRedirectPage()));
+      } else {
+        _snack(result['error'] ?? 'Google sign-in failed', isError: true);
+      }
+    } catch (e) {
+      if (mounted) _snack('Google sign-in failed. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _handleEmailLogin() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final user = await AuthService().signInWithEmail(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text,
       );
-      if (cred.user != null && mounted) {
+      if (user != null && mounted) {
+        // Re-initialise notifications so FCM token is saved for this user
+        NotificationService().initialize();
         Navigator.pushReplacement(context,
             MaterialPageRoute(builder: (_) => const RoleRedirectPage()));
       }
@@ -94,25 +124,35 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   Future<void> _handlePhoneLogin() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
-    try {
-      await Future.delayed(const Duration(milliseconds: 400));
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => OtpPage(
-            phone: _phoneCtrl.text.trim(),
-            name: '',
-            email: '',
-            password: '',
+    final phone = _phoneCtrl.text.trim();
+    // Ensure phone has country code
+    final formattedPhone = phone.startsWith('+') ? phone : '+91$phone';
+    await AuthService().verifyPhoneNumber(
+      phoneNumber: formattedPhone,
+      onCodeSent: (verificationId) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OtpPage(
+              phone: formattedPhone,
+              verificationId: verificationId,
+            ),
           ),
-        ),
-      );
-    } catch (_) {
-      if (mounted) _snack('Could not send OTP. Try again.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+        );
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _snack(error, isError: true);
+      },
+      onAutoVerify: (user) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.pushReplacementNamed(context, '/role-redirect');
+      },
+    );
   }
 
   void _snack(String msg, {required bool isError}) {
@@ -709,6 +749,52 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                           ),
                   ),
                 ),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(child: Divider(color: Colors.grey.shade300, thickness: 0.8)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('or', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+                  ),
+                  Expanded(child: Divider(color: Colors.grey.shade300, thickness: 0.8)),
+                ]),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: OutlinedButton(
+                    onPressed: _isLoading ? null : _handleGoogleLogin,
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.grey.shade300, width: 1.2),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18)),
+                      backgroundColor: Colors.white,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.network(
+                          'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
+                          height: 22,
+                          width: 22,
+                          errorBuilder: (_, __, ___) => const Icon(
+                              Icons.g_mobiledata_rounded,
+                              size: 26,
+                              color: Color(0xFF4285F4)),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Continue with Google',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF3C4043),
+                              letterSpacing: 0.2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -761,6 +847,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
+      key: ValueKey('field_$label'),
       controller: controller,
       keyboardType: keyboard,
       obscureText: obscure,

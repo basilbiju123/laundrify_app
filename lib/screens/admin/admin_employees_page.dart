@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../services/employee_notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'admin_theme.dart';
 import '../../services/role_based_auth_service.dart';
@@ -13,8 +15,24 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
   final _db = FirebaseFirestore.instance;
   String _filterRole = 'all';
 
+  // ─── Maps each role to its dedicated Firestore collection ───────────────
+  static const Map<String, String> _roleCollections = {
+    'delivery': 'delivery_agents',
+    'manager': 'managers',
+    'staff': 'staff',
+  };
+
+  // ─── Stream: query role-specific collection(s) for the chosen filter ─────
+  // Employees are ALWAYS in delivery_agents/managers/staff — NEVER in /users.
+  // When filter == 'all', the build() method uses _AllEmployeesWidget.
+  Stream<QuerySnapshot> get _employeeStream {
+    final col = _roleCollections[_filterRole] ?? 'delivery_agents';
+    return _db.collection(col).orderBy('createdAt', descending: true).snapshots();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -23,11 +41,11 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Employee Management', style: AdminTheme.heading(20)),
+              Text('Employee Management', style: at.heading(20)),
               const SizedBox(height: 4),
-              const Text('Manage delivery agents, managers & staff',
+              Text('Manage delivery agents, managers & staff',
                   style:
-                      TextStyle(fontSize: 13, color: AdminTheme.textSecondary)),
+                      TextStyle(fontSize: 13, color: at.textSecondary)),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,
@@ -86,9 +104,15 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
           ),
         ),
 
+        // ── Collection indicator chip ────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+          child: _CollectionBadge(filterRole: _filterRole),
+        ),
+
         // ROLE FILTER CHIPS
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -100,7 +124,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                         ? AdminTheme.violet
                         : r == 'staff'
                             ? AdminTheme.amber
-                            : AdminTheme.textSecondary;
+                            : at.textSecondary;
                 return GestureDetector(
                   onTap: () => setState(() => _filterRole = r),
                   child: AnimatedContainer(
@@ -110,17 +134,17 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                     decoration: BoxDecoration(
                       color:
-                          active ? c.withValues(alpha: 0.2) : AdminTheme.card,
+                          active ? c.withValues(alpha: 0.2) : at.card,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: active ? c : AdminTheme.cardBorder,
+                          color: active ? c : at.cardBorder,
                           width: active ? 1.5 : 1),
                     ),
                     child: Text(r.toUpperCase(),
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
-                            color: active ? c : AdminTheme.textSecondary)),
+                            color: active ? c : at.textSecondary)),
                   ),
                 );
               }).toList(),
@@ -128,17 +152,17 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
 
         Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _filterRole == 'all'
-                ? _db.collection('users').where('role',
-                    whereIn: ['delivery', 'manager', 'staff']).snapshots()
-                : _db
-                    .collection('users')
-                    .where('role', isEqualTo: _filterRole)
-                    .snapshots(),
+          child: _filterRole == 'all'
+              ? _AllEmployeesView(
+                  onAddEmployee: () => _showAddEmployeeSheet(context),
+                  onEmployeeDetails: _showEmployeeDetails,
+                  onChangeRole: _showChangeRoleSheet,
+                )
+              : StreamBuilder<QuerySnapshot>(
+            stream: _employeeStream,
             builder: (ctx, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const Center(
@@ -148,10 +172,10 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
               if (!snap.hasData || snap.data!.docs.isEmpty) {
                 return Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.badge_outlined,
-                      color: AdminTheme.textMuted, size: 56),
+                  Icon(Icons.badge_outlined,
+                      color: at.textMuted, size: 56),
                   const SizedBox(height: 16),
-                  Text('No employees found', style: AdminTheme.heading(16)),
+                  Text('No employees found', style: at.heading(16)),
                   const SizedBox(height: 8),
                   GestureDetector(
                       onTap: () => _showAddEmployeeSheet(ctx),
@@ -169,216 +193,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                 itemBuilder: (_, i) {
                   final doc = snap.data!.docs[i];
                   final d = doc.data() as Map<String, dynamic>;
-                  final role = d['role'] ?? 'staff';
-                  final roleColor = role == 'delivery'
-                      ? AdminTheme.gold
-                      : role == 'manager'
-                          ? AdminTheme.violet
-                          : AdminTheme.amber;
-                  final activeOrders = d['activeOrders'] ?? 0;
-                  final completedOrders = d['completedOrders'] ?? 0;
-
-                  return GestureDetector(
-                    onTap: () => _showEmployeeDetails(context, doc.id, d),
-                    child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: AdminTheme.cardDecoration(),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Stack(
-                              children: [
-                                CircleAvatar(
-                                  radius: 26,
-                                  backgroundColor:
-                                      roleColor.withValues(alpha: 0.2),
-                                  backgroundImage: d['photoURL'] != null
-                                      ? NetworkImage(d['photoURL'])
-                                      : null,
-                                  child: d['photoURL'] == null
-                                      ? Text(
-                                          (d['name'] as String? ?? 'E')[0]
-                                              .toUpperCase(),
-                                          style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w900,
-                                              color: roleColor))
-                                      : null,
-                                ),
-                                Positioned(
-                                    bottom: 0,
-                                    right: 0,
-                                    child: Container(
-                                      width: 14,
-                                      height: 14,
-                                      decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: (d['isActive'] ?? true)
-                                              ? AdminTheme.emerald
-                                              : AdminTheme.rose,
-                                          border: Border.all(
-                                              color: AdminTheme.surface,
-                                              width: 2)),
-                                    )),
-                              ],
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(children: [
-                                    Expanded(
-                                        child: Text(d['name'] ?? 'Employee',
-                                            style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w800,
-                                                color:
-                                                    AdminTheme.textPrimary))),
-                                    AdminBadge(
-                                        label: role,
-                                        color: roleColor,
-                                        fontSize: 10),
-                                  ]),
-                                  const SizedBox(height: 4),
-                                  Text(d['email'] ?? '',
-                                      style: AdminTheme.label(12)),
-                                  const SizedBox(height: 4),
-                                  Text(d['phone'] ?? '',
-                                      style: AdminTheme.label(11).copyWith(
-                                          color: AdminTheme.textMuted)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        Container(height: 1, color: AdminTheme.cardBorder),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _statCol('Active', activeOrders.toString(),
-                                AdminTheme.amber),
-                            _divider(),
-                            _statCol('Completed', completedOrders.toString(),
-                                AdminTheme.emerald),
-                            _divider(),
-                            _statCol(
-                                'Rating',
-                                '${(d['rating'] ?? 4.5).toStringAsFixed(1)}⭐',
-                                AdminTheme.gold),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Container(height: 1, color: AdminTheme.cardBorder),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showChangeRoleSheet(
-                                    context, doc.id, d['name'] ?? '', role),
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 9),
-                                  decoration: BoxDecoration(
-                                    color: AdminTheme.violet
-                                        .withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: AdminTheme.violet
-                                            .withValues(alpha: 0.2)),
-                                  ),
-                                  child: const Text('Change Role',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: AdminTheme.violet)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () async {
-                                  // Only primary admin can remove roles
-                                  final canRemove = RoleBasedAuthService().canPerformDangerousActions;
-                                  if (!canRemove) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Only the primary admin can remove employee roles.'),
-                                          backgroundColor: AdminTheme.rose,
-                                          behavior: SnackBarBehavior.floating,
-                                        ),
-                                      );
-                                    }
-                                    return;
-                                  }
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      backgroundColor: AdminTheme.surface,
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(20)),
-                                      title: Text(
-                                          'Remove ${d['name'] ?? 'employee'}?',
-                                          style: AdminTheme.heading(16)),
-                                      content: const Text(
-                                          'This will set their role back to regular user.',
-                                          style: TextStyle(
-                                              color: AdminTheme.textSecondary)),
-                                      actions: [
-                                        TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, false),
-                                            child: const Text('Cancel')),
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, true),
-                                          child: const Text('Remove',
-                                              style: TextStyle(
-                                                  color: AdminTheme.rose)),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirm == true) {
-                                    await RoleBasedAuthService()
-                                        .removeRole(doc.id);
-                                  }
-                                },
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 9),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        AdminTheme.rose.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: AdminTheme.rose
-                                            .withValues(alpha: 0.2)),
-                                  ),
-                                  child: const Text('Remove Role',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: AdminTheme.rose)),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),  // closes GestureDetector
-                  );
+                  return _buildEmployeeCard(context, doc.id, d);
                 },
               );
             },
@@ -388,7 +203,124 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     );
   }
 
+  // ─── Employee card builder (used by single-role StreamBuilder and AllEmployeesView) ───
+  Widget _buildEmployeeCard(BuildContext context, String docId, Map<String, dynamic> d) {
+    final at = DynAdmin.of(context);
+    final role = d['role'] ?? 'staff';
+    final roleColor = role == 'delivery'
+        ? AdminTheme.gold
+        : role == 'manager'
+            ? AdminTheme.violet
+            : AdminTheme.amber;
+    final activeOrders = d['activeOrders'] ?? 0;
+    final completedOrders = d['completedOrders'] ?? 0;
+    return GestureDetector(
+      onTap: () => _showEmployeeDetails(context, docId, d),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: at.cardDecoration(),
+        child: Column(children: [
+          Row(children: [
+            Stack(children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: roleColor.withValues(alpha: 0.2),
+                backgroundImage: d['photoURL'] != null ? NetworkImage(d['photoURL'] as String) : null,
+                child: d['photoURL'] == null
+                    ? Text((d['name'] as String? ?? 'E')[0].toUpperCase(),
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: roleColor))
+                    : null,
+              ),
+              Positioned(bottom: 0, right: 0,
+                child: Container(width: 14, height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (d['isActive'] ?? true) ? AdminTheme.emerald : AdminTheme.rose,
+                    border: Border.all(color: at.surface, width: 2),
+                  ))),
+            ]),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(child: Text(d['name'] ?? 'Employee',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: at.textPrimary))),
+                AdminBadge(label: role, color: roleColor, fontSize: 10),
+              ]),
+              const SizedBox(height: 4),
+              Text(d['email'] ?? '', style: at.label(12)),
+              const SizedBox(height: 4),
+              Text(d['phone'] ?? '', style: at.label(11).copyWith(color: at.textMuted)),
+            ])),
+          ]),
+          const SizedBox(height: 14),
+          Container(height: 1, color: at.cardBorder),
+          const SizedBox(height: 12),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+            _statCol('Active', activeOrders.toString(), AdminTheme.amber),
+            _divider(context),
+            _statCol('Completed', completedOrders.toString(), AdminTheme.emerald),
+            _divider(context),
+            _statCol('Rating', '${(d['rating'] ?? 4.5).toStringAsFixed(1)}⭐', AdminTheme.gold),
+          ]),
+          const SizedBox(height: 12),
+          Container(height: 1, color: at.cardBorder),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: GestureDetector(
+              onTap: () => _showChangeRoleSheet(context, docId, d['name'] ?? '', role),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: AdminTheme.violet.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AdminTheme.violet.withValues(alpha: 0.2)),
+                ),
+                child: const Text('Change Role', textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AdminTheme.violet)),
+              ),
+            )),
+            const SizedBox(width: 10),
+            Expanded(child: GestureDetector(
+              onTap: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: at.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    title: Text('Remove ${d['name'] ?? 'employee'}?', style: at.heading(16)),
+                    content: Text('This will remove them from employee records.', style: TextStyle(color: at.textSecondary)),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Remove', style: TextStyle(color: AdminTheme.rose))),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await RoleBasedAuthService().removeRole(docId);
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: AdminTheme.rose.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AdminTheme.rose.withValues(alpha: 0.2)),
+                ),
+                child: const Text('Remove Role', textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AdminTheme.rose)),
+              ),
+            )),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  // ─── Employee details bottom sheet ──────────────────────────────────────
   void _showEmployeeDetails(BuildContext context, String uid, Map<String, dynamic> d) {
+    final at = DynAdmin.of(context);
     final role = d['role'] ?? 'staff';
     final roleColor = role == 'delivery'
         ? AdminTheme.gold
@@ -397,10 +329,11 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
             : AdminTheme.amber;
     final name = d['name'] ?? 'Employee';
     final initials = name.split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase();
+    final collection = _roleCollections[role] ?? 'users';
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AdminTheme.surface,
+      backgroundColor: at.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       isScrollControlled: true,
@@ -413,17 +346,15 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
           controller: scrollCtrl,
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Handle
             Center(
               child: Container(
                 width: 40, height: 4,
                 margin: const EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                    color: AdminTheme.textMuted.withValues(alpha: 0.3),
+                    color: at.textMuted.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(2)),
               ),
             ),
-            // Header
             Row(children: [
               CircleAvatar(
                 radius: 32,
@@ -436,32 +367,33 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
               ),
               const SizedBox(width: 16),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(name, style: AdminTheme.heading(20)),
+                Text(name, style: at.heading(20)),
                 const SizedBox(height: 4),
                 AdminBadge(label: role, color: roleColor),
               ])),
+              // Show which collection this doc lives in
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                    color: (d['isActive'] ?? true) ? AdminTheme.emerald.withValues(alpha: 0.12) : AdminTheme.rose.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10)),
-                child: Icon(
-                    (d['isActive'] ?? true) ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                    color: (d['isActive'] ?? true) ? AdminTheme.emerald : AdminTheme.rose,
-                    size: 20),
+                  color: AdminTheme.cyan.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AdminTheme.cyan.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  collection,
+                  style: const TextStyle(fontSize: 10, color: AdminTheme.cyan, fontWeight: FontWeight.w700),
+                ),
               ),
             ]),
             const SizedBox(height: 24),
-            // Contact Info
-            Text('Contact Information', style: AdminTheme.heading(14)),
+            Text('Contact Information', style: at.heading(14)),
             const SizedBox(height: 12),
             _detailRow(Icons.email_outlined, 'Email', d['email'] ?? '—'),
             _detailRow(Icons.phone_outlined, 'Phone', d['phone'] ?? '—'),
             _detailRow(Icons.location_on_outlined, 'Address', d['address'] ?? '—'),
-            _detailRow(Icons.badge_outlined, 'Employee ID', uid.substring(0, 8).toUpperCase()),
+            _detailRow(Icons.badge_outlined, 'Employee ID', d['employeeId'] ?? uid.substring(0, 8).toUpperCase()),
             const SizedBox(height: 20),
-            // Performance
-            Text('Performance', style: AdminTheme.heading(14)),
+            Text('Performance', style: at.heading(14)),
             const SizedBox(height: 12),
             Row(children: [
               _perfTile('Active Orders', '${d['activeOrders'] ?? 0}', AdminTheme.amber),
@@ -470,16 +402,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
               const SizedBox(width: 10),
               _perfTile('Rating', '${(d['rating'] ?? 4.5).toStringAsFixed(1)} ⭐', AdminTheme.gold),
             ]),
-            const SizedBox(height: 20),
-            // Additional info
-            if (d['joinedAt'] != null) ...[
-              Text('Additional Info', style: AdminTheme.heading(14)),
-              const SizedBox(height: 12),
-              _detailRow(Icons.calendar_today_rounded, 'Joined', d['joinedAt'] ?? '—'),
-              if (d['gender'] != null) _detailRow(Icons.person_outline, 'Gender', d['gender'] ?? '—'),
-            ],
             const SizedBox(height: 24),
-            // Actions
             Row(children: [
               Expanded(
                 child: OutlinedButton.icon(
@@ -504,25 +427,30 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     );
   }
 
-  Widget _detailRow(IconData icon, String label, String value) => Padding(
+  Widget _detailRow(IconData icon, String label, String value) {
+    final at = DynAdmin.of(context);
+    return Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: Row(children: [
       Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-            color: AdminTheme.textMuted.withValues(alpha: 0.08),
+            color: at.textMuted.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8)),
-        child: Icon(icon, size: 16, color: AdminTheme.textSecondary),
+        child: Icon(icon, size: 16, color: at.textSecondary),
       ),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: AdminTheme.textMuted, fontWeight: FontWeight.w600)),
-        Text(value, style: AdminTheme.label(13).copyWith(color: AdminTheme.textPrimary)),
+        Text(label, style: TextStyle(fontSize: 11, color: at.textMuted, fontWeight: FontWeight.w600)),
+        Text(value, style: at.label(13).copyWith(color: at.textPrimary)),
       ])),
     ]),
   );
+  }
 
-  Widget _perfTile(String label, String value, Color color) => Expanded(
+  Widget _perfTile(String label, String value, Color color) {
+    final at = DynAdmin.of(context);
+    return Expanded(
     child: Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
@@ -532,14 +460,17 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
       child: Column(children: [
         Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color)),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 10, color: AdminTheme.textMuted, fontWeight: FontWeight.w600),
+        Text(label, style: TextStyle(fontSize: 10, color: at.textMuted, fontWeight: FontWeight.w600),
             textAlign: TextAlign.center),
       ]),
     ),
   );
+  }
 
+  // ─── Change Role sheet ───────────────────────────────────────────────────
   void _showChangeRoleSheet(
       BuildContext ctx, String uid, String name, String currentRole) {
+    final at = DynAdmin.of(ctx);
     String selectedRole = currentRole;
     bool isLoading = false;
 
@@ -553,8 +484,8 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
               EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(
-              color: AdminTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              color: at.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             ),
             padding: const EdgeInsets.all(24),
             child: SingleChildScrollView(
@@ -567,13 +498,33 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 20),
                       decoration: BoxDecoration(
-                          color: AdminTheme.textMuted,
+                          color: at.textMuted,
                           borderRadius: BorderRadius.circular(2))),
-                  Text('Change Role — $name', style: AdminTheme.heading(18)),
+                  Text('Change Role — $name', style: at.heading(18)),
                   const SizedBox(height: 6),
                   Text('Current role: ${currentRole.toUpperCase()}',
-                      style: AdminTheme.label(13)),
-                  const SizedBox(height: 24),
+                      style: at.label(13)),
+                  const SizedBox(height: 8),
+                  // Collection info
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AdminTheme.cyan.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AdminTheme.cyan.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline_rounded, size: 14, color: AdminTheme.cyan),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Changing role will update this employee\'s access level',
+                          style: const TextStyle(fontSize: 11, color: AdminTheme.cyan),
+                        ),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 16),
                   Row(
                     children: ['manager', 'delivery', 'staff'].map((r) {
                       final active = selectedRole == r;
@@ -594,19 +545,21 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                             decoration: BoxDecoration(
                               color: active
                                   ? c.withValues(alpha: 0.2)
-                                  : AdminTheme.card,
+                                  : at.card,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                  color: active ? c : AdminTheme.cardBorder,
+                                  color: active ? c : at.cardBorder,
                                   width: active ? 1.5 : 1),
                             ),
-                            child: Text(r.toUpperCase(),
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
-                                    color:
-                                        active ? c : AdminTheme.textSecondary)),
+                            child: Column(children: [
+                              Text(r.toUpperCase(),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: active ? c : at.textSecondary)),
+                
+                            ]),
                           ),
                         ),
                       );
@@ -627,9 +580,24 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                           ? null
                           : () async {
                               setLocal(() => isLoading = true);
+                              // assignRole handles collection migration + sends notification
                               await RoleBasedAuthService()
                                   .assignRole(uid, selectedRole);
-                              if (ctx2.mounted) Navigator.pop(ctx2);
+                              if (ctx2.mounted) {
+                                Navigator.pop(ctx2);
+                                ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(
+                                  content: Row(children: [
+                                    const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text('Role updated to ${selectedRole.toUpperCase()} — employee notified'),
+                                  ]),
+                                  backgroundColor: AdminTheme.violet,
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: const Duration(seconds: 3),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  margin: const EdgeInsets.all(16),
+                                ));
+                              }
                             },
                       child: isLoading
                           ? const SizedBox(
@@ -654,20 +622,24 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
   }
 
   Widget _statCol(String label, String value, Color color) {
+    final at = DynAdmin.of(context);
     return Column(children: [
       Text(value,
           style: TextStyle(
               fontSize: 16, fontWeight: FontWeight.w900, color: color)),
       const SizedBox(height: 2),
-      Text(label, style: AdminTheme.label(11)),
+      Text(label, style: at.label(11)),
     ]);
   }
 
-  Widget _divider() =>
-      Container(width: 1, height: 30, color: AdminTheme.cardBorder);
+  Widget _divider(BuildContext ctx) {
+    final at = DynAdmin.of(ctx);
+    return Container(width: 1, height: 30, color: at.cardBorder);
+  }
 
-  // ── Assign Role by Email (for existing registered users) ──────────────
+  // ─── Assign Role by Email sheet ──────────────────────────────────────────
   void _showAssignRoleByEmailSheet(BuildContext ctx) {
+    final at = DynAdmin.of(ctx);
     final emailCtrl = TextEditingController();
     String selectedRole = 'manager';
     bool isLoading = false;
@@ -683,8 +655,8 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
               EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(
-              color: AdminTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              color: at.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             ),
             padding: const EdgeInsets.all(24),
             child: SingleChildScrollView(
@@ -697,18 +669,18 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 20),
                       decoration: BoxDecoration(
-                          color: AdminTheme.textMuted,
+                          color: at.textMuted,
                           borderRadius: BorderRadius.circular(2))),
-                  Text('Assign Role by Email', style: AdminTheme.heading(20)),
+                  Text('Assign Role by Email', style: at.heading(20)),
                   const SizedBox(height: 6),
                   Text('Assign a role to an existing registered user',
-                      style: AdminTheme.label(13)),
+                      style: at.label(13)),
                   const SizedBox(height: 24),
-                  _buildField(
+                  _buildField(ctx,
                       emailCtrl, 'User Email Address', Icons.email_outlined,
                       keyboard: TextInputType.emailAddress),
                   const SizedBox(height: 14),
-                  Text('Role to Assign', style: AdminTheme.label(13)),
+                  Text('Role to Assign', style: at.label(13)),
                   const SizedBox(height: 8),
                   Row(
                     children: ['manager', 'delivery', 'staff'].map((r) {
@@ -730,19 +702,21 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                             decoration: BoxDecoration(
                               color: active
                                   ? c.withValues(alpha: 0.2)
-                                  : AdminTheme.card,
+                                  : at.card,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                  color: active ? c : AdminTheme.cardBorder,
+                                  color: active ? c : at.cardBorder,
                                   width: active ? 1.5 : 1),
                             ),
-                            child: Text(r.toUpperCase(),
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color:
-                                        active ? c : AdminTheme.textSecondary)),
+                            child: Column(children: [
+                              Text(r.toUpperCase(),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: active ? c : at.textSecondary)),
+                
+                            ]),
                           ),
                         ),
                       );
@@ -791,15 +765,28 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                               final roleService = RoleBasedAuthService();
                               final result = await roleService.addRoleByEmail(
                                   emailCtrl.text.trim(), selectedRole);
+                              if (result['success'] == true) {
+                                final assignedName = result['name'] as String? ?? '';
+                                final assignedPhone = result['phone'] as String? ?? '';
+                                final assignedEmpId = result['employeeId'] as String? ?? 'EMP-NEW';
+                                if (ctx2.mounted) {
+                                  await EmployeeNotificationService().notifyNewEmployee(
+                                    context: ctx2,
+                                    name: assignedName.isNotEmpty ? assignedName : emailCtrl.text.trim(),
+                                    email: emailCtrl.text.trim().toLowerCase(),
+                                    phone: assignedPhone,
+                                    role: selectedRole,
+                                    employeeId: assignedEmpId,
+                                  );
+                                }
+                              }
                               setLocal(() {
                                 isLoading = false;
                                 if (result['success'] == true) {
-                                  feedback =
-                                      '✓ Role assigned to ${result['name'] ?? emailCtrl.text}';
+                                  feedback = '✓ Role assigned successfully';
                                   emailCtrl.clear();
                                 } else {
-                                  feedback =
-                                      '✗ ${result['error'] ?? 'Failed to assign role'}';
+                                  feedback = '✗ ${result['error'] ?? 'Failed to assign role'}';
                                 }
                               });
                             },
@@ -825,7 +812,9 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     );
   }
 
+  // ─── Add New Employee sheet ───────────────────────────────────────────────
   void _showAddEmployeeSheet(BuildContext ctx) {
+    final at = DynAdmin.of(ctx);
     final db = FirebaseFirestore.instance;
     final nameCtrl        = TextEditingController();
     final emailCtrl       = TextEditingController();
@@ -840,8 +829,6 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     String selectedShift  = 'Morning';
     bool   isLoading      = false;
     String? feedback;
-
-    // Scroll controller so keyboard pushes content up
     final scrollCtrl = ScrollController();
 
     showModalBottomSheet(
@@ -852,7 +839,6 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
       builder: (_) => StatefulBuilder(
         builder: (ctx2, setLocal) {
           return AnimatedPadding(
-            // Moves sheet up when keyboard appears
             padding: EdgeInsets.only(
                 bottom: MediaQuery.of(ctx2).viewInsets.bottom),
             duration: const Duration(milliseconds: 200),
@@ -862,13 +848,12 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                 maxHeight: MediaQuery.of(ctx2).size.height * 0.92,
               ),
               decoration: BoxDecoration(
-                  color: AdminTheme.surface,
+                  color: at.surface,
                   borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(28))),
+                      const BorderRadius.vertical(top: Radius.circular(28))),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // ── Drag handle + header ──────────────────
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
                     child: Column(
@@ -879,7 +864,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                               width: 40, height: 4,
                               margin: const EdgeInsets.only(bottom: 16),
                               decoration: BoxDecoration(
-                                  color: AdminTheme.textMuted,
+                                  color: at.textMuted,
                                   borderRadius: BorderRadius.circular(2))),
                         ),
                         Row(children: [
@@ -893,18 +878,17 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                           ),
                           const SizedBox(width: 12),
                           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('Add New Employee', style: AdminTheme.heading(18)),
+                            Text('Add New Employee', style: at.heading(18)),
                             Text('Fill in the employee details below',
-                                style: AdminTheme.label(12)),
+                                style: at.label(12)),
                           ]),
                         ]),
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Divider(color: AdminTheme.cardBorder, height: 1),
+                  Divider(color: at.cardBorder, height: 1),
 
-                  // ── Scrollable form body ──────────────────
                   Flexible(
                     child: SingleChildScrollView(
                       controller: scrollCtrl,
@@ -913,23 +897,34 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
 
-                          // ── SECTION: Personal Info ──
                           _sectionLabel('Personal Information'),
                           const SizedBox(height: 12),
-                          _buildField(nameCtrl, 'Full Name *',
+                          _buildField(ctx, nameCtrl, 'Full Name *',
                               Icons.person_outline_rounded),
                           const SizedBox(height: 12),
-                          _buildField(emailCtrl, 'Email Address *',
+                          _buildField(ctx, emailCtrl, 'Google Account Email *',
                               Icons.email_outlined,
                               keyboard: TextInputType.emailAddress),
+                          // Helper text for Google account
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6, left: 4),
+                            child: Row(children: [
+                              const Icon(Icons.info_outline_rounded, size: 12, color: AdminTheme.cyan),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Use their Google account email — they\'ll be routed to the correct dashboard on sign-in',
+                                style: at.label(11).copyWith(color: AdminTheme.cyan),
+                              ),
+                            ]),
+                          ),
                           const SizedBox(height: 12),
-                          _buildField(phoneCtrl, 'Phone Number *',
+                          _buildField(ctx, phoneCtrl, 'Phone Number *',
                               Icons.phone_outlined,
                               keyboard: TextInputType.phone),
                           const SizedBox(height: 12),
 
                           // Gender picker
-                          Text('Gender', style: AdminTheme.label(13)),
+                          Text('Gender', style: at.label(13)),
                           const SizedBox(height: 8),
                           Row(
                             children: ['Male', 'Female', 'Other'].map((g) {
@@ -944,12 +939,12 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                   decoration: BoxDecoration(
                                     color: active
                                         ? AdminTheme.accent.withValues(alpha: 0.15)
-                                        : AdminTheme.card,
+                                        : at.card,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: active
                                             ? AdminTheme.accent
-                                            : AdminTheme.cardBorder,
+                                            : at.cardBorder,
                                         width: active ? 1.5 : 1),
                                   ),
                                   child: Text(g,
@@ -958,14 +953,13 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                           fontWeight: FontWeight.w700,
                                           color: active
                                               ? AdminTheme.accent
-                                              : AdminTheme.textSecondary)),
+                                              : at.textSecondary)),
                                 ),
                               );
                             }).toList(),
                           ),
                           const SizedBox(height: 12),
 
-                          // Date of Birth — tap to pick
                           GestureDetector(
                             onTap: () async {
                               final picked = await showDatePicker(
@@ -978,8 +972,8 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                   data: Theme.of(c).copyWith(
                                     colorScheme: ColorScheme.dark(
                                       primary: AdminTheme.gold,
-                                      surface: AdminTheme.surface,
-                                      onSurface: AdminTheme.textPrimary,
+                                      surface: at.surface,
+                                      onSurface: at.textPrimary,
                                     ),
                                   ),
                                   child: child!,
@@ -993,32 +987,29 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                               }
                             },
                             child: AbsorbPointer(
-                              child: _buildField(dobCtrl, 'Date of Birth',
+                              child: _buildField(ctx, dobCtrl, 'Date of Birth',
                                   Icons.cake_outlined),
                             ),
                           ),
                           const SizedBox(height: 12),
-
-                          _buildField(addressCtrl, 'Home Address',
+                          _buildField(ctx, addressCtrl, 'Home Address',
                               Icons.home_outlined,
                               maxLines: 2),
                           const SizedBox(height: 12),
-                          _buildField(emergencyCtrl, 'Emergency Contact Number',
+                          _buildField(ctx, emergencyCtrl, 'Emergency Contact Number',
                               Icons.emergency_outlined,
                               keyboard: TextInputType.phone),
 
                           const SizedBox(height: 20),
 
-                          // ── SECTION: Work Details ──
                           _sectionLabel('Work Details'),
                           const SizedBox(height: 12),
-
-                          _buildField(employeeIdCtrl, 'Employee ID',
+                          _buildField(ctx, employeeIdCtrl, 'Employee ID',
                               Icons.badge_outlined),
                           const SizedBox(height: 12),
 
-                          // Role
-                          Text('Role *', style: AdminTheme.label(13)),
+                          // Role selector — shows target collection
+                          Text('Role *', style: at.label(13)),
                           const SizedBox(height: 8),
                           Wrap(
                             spacing: 10,
@@ -1039,32 +1030,31 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                   decoration: BoxDecoration(
                                     color: active
                                         ? c.withValues(alpha: 0.18)
-                                        : AdminTheme.card,
+                                        : at.card,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                        color: active
-                                            ? c
-                                            : AdminTheme.cardBorder,
+                                        color: active ? c : at.cardBorder,
                                         width: active ? 1.5 : 1),
                                   ),
-                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                    Icon(
-                                      r == 'delivery'
-                                          ? Icons.delivery_dining_rounded
-                                          : r == 'manager'
-                                              ? Icons.manage_accounts_rounded
-                                              : Icons.engineering_rounded,
-                                      color: active ? c : AdminTheme.textSecondary,
-                                      size: 15,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(r.toUpperCase(),
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w800,
-                                            color: active
-                                                ? c
-                                                : AdminTheme.textSecondary)),
+                                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                    Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Icon(
+                                        r == 'delivery'
+                                            ? Icons.delivery_dining_rounded
+                                            : r == 'manager'
+                                                ? Icons.manage_accounts_rounded
+                                                : Icons.engineering_rounded,
+                                        color: active ? c : at.textSecondary,
+                                        size: 15,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(r.toUpperCase(),
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              color: active ? c : at.textSecondary)),
+                                    ]),
+
                                   ]),
                                 ),
                               );
@@ -1073,7 +1063,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                           const SizedBox(height: 12),
 
                           // Shift
-                          Text('Shift', style: AdminTheme.label(13)),
+                          Text('Shift', style: at.label(13)),
                           const SizedBox(height: 8),
                           Row(
                             children: ['Morning', 'Evening', 'Night'].map((s) {
@@ -1088,12 +1078,12 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                   decoration: BoxDecoration(
                                     color: active
                                         ? AdminTheme.cyan.withValues(alpha: 0.15)
-                                        : AdminTheme.card,
+                                        : at.card,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: active
                                             ? AdminTheme.cyan
-                                            : AdminTheme.cardBorder,
+                                            : at.cardBorder,
                                         width: active ? 1.5 : 1),
                                   ),
                                   child: Text(s,
@@ -1102,13 +1092,12 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                           fontWeight: FontWeight.w700,
                                           color: active
                                               ? AdminTheme.cyan
-                                              : AdminTheme.textSecondary)),
+                                              : at.textSecondary)),
                                 ),
                               );
                             }).toList(),
                           ),
 
-                          // Feedback banner
                           if (feedback != null) ...[
                             const SizedBox(height: 14),
                             Container(
@@ -1146,21 +1135,19 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                               ]),
                             ),
                           ],
-
                           const SizedBox(height: 24),
                         ],
                       ),
                     ),
                   ),
 
-                  // ── Sticky Submit Button ──────────────────
+                  // Sticky submit button
                   Container(
                     padding: EdgeInsets.fromLTRB(
                         24, 12, 24, MediaQuery.of(ctx2).padding.bottom + 16),
                     decoration: BoxDecoration(
-                      color: AdminTheme.surface,
-                      border: Border(
-                          top: BorderSide(color: AdminTheme.cardBorder)),
+                      color: at.surface,
+                      border: Border(top: BorderSide(color: at.cardBorder)),
                     ),
                     child: SizedBox(
                       width: double.infinity,
@@ -1175,8 +1162,7 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                         onPressed: isLoading
                             ? null
                             : () async {
-                                final messenger =
-                                    ScaffoldMessenger.of(context);
+                                final messenger = ScaffoldMessenger.of(context);
                                 if (nameCtrl.text.trim().isEmpty ||
                                     emailCtrl.text.trim().isEmpty ||
                                     phoneCtrl.text.trim().isEmpty) {
@@ -1189,15 +1175,20 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                   feedback = null;
                                 });
                                 try {
+                                  final email = emailCtrl.text.trim().toLowerCase();
+                                  final empId = employeeIdCtrl.text.trim();
+                                  final roleCol = _roleCollections[selectedRole]!;
+
+                                  // Base data for users collection
                                   final data = <String, dynamic>{
                                     'name': nameCtrl.text.trim(),
-                                    'email': emailCtrl.text.trim().toLowerCase(),
+                                    'email': email,
                                     'phone': phoneCtrl.text.trim(),
                                     'gender': selectedGender,
                                     'dateOfBirth': dobCtrl.text.trim(),
                                     'address': addressCtrl.text.trim(),
                                     'emergencyContact': emergencyCtrl.text.trim(),
-                                    'employeeId': employeeIdCtrl.text.trim(),
+                                    'employeeId': empId,
                                     'role': selectedRole,
                                     'shift': selectedShift.toLowerCase(),
                                     'isBlocked': false,
@@ -1208,77 +1199,71 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
                                     'totalSpent': 0.0,
                                     'activeOrders': 0,
                                     'completedOrders': 0,
+                                    'rating': 5.0,
                                     'createdAt': FieldValue.serverTimestamp(),
                                     'updatedAt': FieldValue.serverTimestamp(),
                                   };
                                   if (selectedRole == 'delivery') {
                                     data['isOnline'] = false;
                                     data['vehicleType'] = 'bike';
-                                    data['rating'] = 5.0;
                                   } else if (selectedRole == 'manager') {
                                     data['managedStaffCount'] = 0;
                                   }
 
-                                  final existing = await db
-                                      .collection('users')
-                                      .where('email',
-                                          isEqualTo: data['email'])
+                                  // ── Pre-register employee in Firestore ──
+                                  // Employees sign in with Google — no password needed.
+                                  // We store their email so the role lookup works
+                                  // the moment they sign in with Google for the first time.
+                                  final phone = phoneCtrl.text.trim();
+
+                                  // Remove this email from other role collections first
+                                  for (final entry in _roleCollections.entries) {
+                                    if (entry.key == selectedRole) continue;
+                                    final old = await db
+                                        .collection(entry.value)
+                                        .where('email', isEqualTo: email)
+                                        .limit(1)
+                                        .get();
+                                    for (final d in old.docs) {
+                                      await d.reference.delete();
+                                    }
+                                  }
+
+                                  // Check if already exists (re-adding same employee)
+                                  final roleRef = db.collection(roleCol);
+                                  final existing = await roleRef
+                                      .where('email', isEqualTo: email)
                                       .limit(1)
                                       .get();
+                                  final docRef = existing.docs.isNotEmpty
+                                      ? roleRef.doc(existing.docs.first.id)
+                                      : roleRef.doc();
+                                  await docRef.set({
+                                    ...data,
+                                    'uid': docRef.id,
+                                    'createdByAdmin': true,
+                                    'loginMethod': 'google',
+                                  }, SetOptions(merge: true));
 
-                                  if (existing.docs.isNotEmpty) {
-                                    await db
-                                        .collection('users')
-                                        .doc(existing.docs.first.id)
-                                        .update({
-                                      'role': selectedRole,
-                                      'name': nameCtrl.text.trim().isNotEmpty
-                                          ? nameCtrl.text.trim()
-                                          : existing.docs.first['name'],
-                                      'phone': phoneCtrl.text.trim().isNotEmpty
-                                          ? phoneCtrl.text.trim()
-                                          : existing.docs.first['phone'],
-                                      'gender': selectedGender,
-                                      'shift': selectedShift.toLowerCase(),
-                                      if (dobCtrl.text.isNotEmpty)
-                                        'dateOfBirth': dobCtrl.text.trim(),
-                                      if (addressCtrl.text.isNotEmpty)
-                                        'address': addressCtrl.text.trim(),
-                                      if (emergencyCtrl.text.isNotEmpty)
-                                        'emergencyContact':
-                                            emergencyCtrl.text.trim(),
-                                      'updatedAt':
-                                          FieldValue.serverTimestamp(),
-                                    });
-                                    if (ctx2.mounted) Navigator.pop(ctx2);
-                                    messenger.showSnackBar(SnackBar(
-                                        content: Text(
-                                            '✓ Existing user updated to ${selectedRole.toUpperCase()}'),
-                                        backgroundColor: AdminTheme.emerald,
-                                        behavior: SnackBarBehavior.floating,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        margin: const EdgeInsets.all(16)));
-                                  } else {
-                                    final newDocRef =
-                                        db.collection('users').doc();
-                                    await newDocRef.set({
-                                      ...data,
-                                      'uid': newDocRef.id,
-                                      'createdByAdmin': true,
-                                    });
-                                    if (ctx2.mounted) Navigator.pop(ctx2);
-                                    messenger.showSnackBar(SnackBar(
-                                        content: Text(
-                                            '✓ "${nameCtrl.text.trim()}" added as ${selectedRole.toUpperCase()}'),
-                                        backgroundColor: AdminTheme.emerald,
-                                        behavior: SnackBarBehavior.floating,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        margin: const EdgeInsets.all(16)));
+                                  // Send welcome email with Google sign-in instructions
+                                  if (ctx2.mounted) {
+                                    await EmployeeNotificationService().notifyNewEmployee(
+                                      context: ctx2,
+                                      name: nameCtrl.text.trim(),
+                                      email: email,
+                                      phone: phone,
+                                      role: selectedRole,
+                                      employeeId: empId,
+                                    );
                                   }
+
+                                  if (ctx2.mounted) Navigator.pop(ctx2);
+                                  _showEmployeeAddedSnackBar(
+                                    messenger: messenger,
+                                    name: nameCtrl.text.trim(),
+                                    role: selectedRole,
+                                    collection: roleCol,
+                                  );
                                 } catch (e) {
                                   setLocal(() {
                                     isLoading = false;
@@ -1316,41 +1301,75 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     );
   }
 
-  Widget _sectionLabel(String label) => Row(children: [
+  void _showEmployeeAddedSnackBar({
+    required ScaffoldMessengerState messenger,
+    required String name,
+    required String role,
+    required String collection,
+  }) {
+    final roleLabel = role == 'delivery'
+        ? 'Delivery Agent'
+        : role == 'manager'
+            ? 'Manager'
+            : 'Staff Member';
+    messenger.showSnackBar(SnackBar(
+      content: Row(children: [
+        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text('$name added as $roleLabel',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+          ]),
+        ),
+      ]),
+      backgroundColor: AdminTheme.emerald,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
+
+  Widget _sectionLabel(String label) {
+    final at = DynAdmin.of(context);
+    return Row(children: [
         Container(width: 3, height: 16,
             decoration: BoxDecoration(
                 color: AdminTheme.gold,
                 borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 8),
         Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
-                color: AdminTheme.textPrimary,
+                color: at.textPrimary,
                 letterSpacing: 0.3)),
       ]);
+  }
 
-  Widget _buildField(TextEditingController ctrl, String label, IconData icon,
+  Widget _buildField(BuildContext ctx, TextEditingController ctrl, String label, IconData icon,
       {TextInputType? keyboard, int maxLines = 1}) {
+    final at = DynAdmin.of(ctx);
     return TextField(
       controller: ctrl,
       keyboardType: keyboard,
       maxLines: maxLines,
-      style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
+      style: TextStyle(color: at.textPrimary, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: AdminTheme.label(13),
-        prefixIcon: Icon(icon, color: AdminTheme.textSecondary, size: 20),
+        labelStyle: at.label(13),
+        prefixIcon: Icon(icon, color: at.textSecondary, size: 20),
         filled: true,
-        fillColor: AdminTheme.card,
+        fillColor: at.card,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: AdminTheme.cardBorder)),
+            borderSide: BorderSide(color: at.cardBorder)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: AdminTheme.cardBorder)),
+            borderSide: BorderSide(color: at.cardBorder)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: AdminTheme.gold, width: 2)),
@@ -1358,3 +1377,241 @@ class _AdminEmployeesPageState extends State<AdminEmployeesPage> {
     );
   }
 }
+
+// ─── Shows employees from ALL 3 role collections merged ──────────────────────
+class _AllEmployeesView extends StatelessWidget {
+  final VoidCallback onAddEmployee;
+  final void Function(BuildContext, String, Map<String, dynamic>) onEmployeeDetails;
+  final void Function(BuildContext, String, String, String) onChangeRole;
+
+  const _AllEmployeesView({
+    required this.onAddEmployee,
+    required this.onEmployeeDetails,
+    required this.onChangeRole,
+  });
+
+  static const _collections = {
+    'delivery': 'delivery_agents',
+    'manager': 'managers',
+    'staff': 'staff',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final db = FirebaseFirestore.instance;
+    final streams = _collections.entries.map((e) => db
+        .collection(e.value)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => {'_role': e.key, '_col': e.value, '_id': d.id, ...d.data()})
+            .toList())).toList();
+
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _mergeStreams(streams),
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: AdminTheme.gold, strokeWidth: 2));
+        }
+        final employees = snap.data ?? [];
+        if (employees.isEmpty) {
+          final at = DynAdmin.of(ctx);
+          return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.badge_outlined, color: at.textMuted, size: 56),
+            const SizedBox(height: 16),
+            Text('No employees found', style: at.heading(16)),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: onAddEmployee,
+              child: const Text('Add first employee →',
+                  style: TextStyle(color: AdminTheme.gold, fontWeight: FontWeight.w700)),
+            ),
+          ]));
+        }
+        return _EmployeeListParent(
+          employees: employees,
+          onEmployeeDetails: onEmployeeDetails,
+          onChangeRole: onChangeRole,
+        );
+      },
+    );
+  }
+
+  Stream<List<Map<String, dynamic>>> _mergeStreams(
+      List<Stream<List<Map<String, dynamic>>>> streams) {
+    // Simple manual merge using async*
+    return _CombineLatest3Stream(streams[0], streams[1], streams[2]);
+  }
+}
+
+class _CombineLatest3Stream
+    extends Stream<List<Map<String, dynamic>>> {
+  final Stream<List<Map<String, dynamic>>> s1, s2, s3;
+  _CombineLatest3Stream(this.s1, this.s2, this.s3);
+
+  @override
+  StreamSubscription<List<Map<String, dynamic>>> listen(
+      void Function(List<Map<String, dynamic>>)? onData,
+      {Function? onError,
+      void Function()? onDone,
+      bool? cancelOnError}) {
+    List<Map<String, dynamic>>? v1, v2, v3;
+    void emit() {
+      if (v1 != null && v2 != null && v3 != null) {
+        onData?.call([...v1!, ...v2!, ...v3!]);
+      }
+    }
+
+    final c = StreamController<List<Map<String, dynamic>>>();
+    s1.listen((v) { v1 = v; emit(); });
+    s2.listen((v) { v2 = v; emit(); });
+    s3.listen((v) { v3 = v; emit(); });
+    return c.stream.listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError ?? false);
+  }
+}
+
+class _EmployeeListParent extends StatefulWidget {
+  final List<Map<String, dynamic>> employees;
+  final void Function(BuildContext, String, Map<String, dynamic>) onEmployeeDetails;
+  final void Function(BuildContext, String, String, String) onChangeRole;
+  const _EmployeeListParent({required this.employees, required this.onEmployeeDetails, required this.onChangeRole});
+  @override
+  State<_EmployeeListParent> createState() => _EmployeeListParentState();
+}
+
+class _EmployeeListParentState extends State<_EmployeeListParent> {
+  @override
+  Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
+      physics: const BouncingScrollPhysics(),
+      itemCount: widget.employees.length,
+      itemBuilder: (_, i) {
+        final d = widget.employees[i];
+        final docId = d['_id'] as String;
+        final role = (d['role'] ?? d['_role'] ?? 'staff') as String;
+        final roleColor = role == 'delivery'
+            ? AdminTheme.gold
+            : role == 'manager'
+                ? AdminTheme.violet
+                : AdminTheme.amber;
+        final activeOrders = d['activeOrders'] ?? 0;
+        final completedOrders = d['completedOrders'] ?? 0;
+        return GestureDetector(
+          onTap: () => widget.onEmployeeDetails(context, docId, d),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: at.cardDecoration(),
+            child: Column(children: [
+              Row(children: [
+                Stack(children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: roleColor.withValues(alpha: 0.2),
+                    backgroundImage: d['photoURL'] != null ? NetworkImage(d['photoURL'] as String) : null,
+                    child: d['photoURL'] == null
+                        ? Text((d['name'] as String? ?? 'E')[0].toUpperCase(),
+                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: roleColor))
+                        : null,
+                  ),
+                  Positioned(bottom: 0, right: 0,
+                    child: Container(width: 14, height: 14,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: (d['isActive'] ?? true) ? AdminTheme.emerald : AdminTheme.rose,
+                        border: Border.all(color: at.surface, width: 2),
+                      ))),
+                ]),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(d['name'] ?? 'Employee',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: at.textPrimary))),
+                    AdminBadge(label: role, color: roleColor, fontSize: 10),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(d['email'] ?? '', style: at.label(12)),
+                ])),
+              ]),
+              const SizedBox(height: 14),
+              Container(height: 1, color: at.cardBorder),
+              const SizedBox(height: 12),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                _sc('Active', activeOrders.toString(), AdminTheme.amber, at),
+                Container(width: 1, height: 30, color: at.cardBorder),
+                _sc('Done', completedOrders.toString(), AdminTheme.emerald, at),
+                Container(width: 1, height: 30, color: at.cardBorder),
+                _sc('Rating', '${(d['rating'] ?? 4.5).toStringAsFixed(1)}⭐', AdminTheme.gold, at),
+              ]),
+              const SizedBox(height: 10),
+              Container(height: 1, color: at.cardBorder),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () => widget.onChangeRole(context, docId, d['name'] ?? '', role),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: AdminTheme.violet.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminTheme.violet.withValues(alpha: 0.2)),
+                  ),
+                  child: const Text('Change Role', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AdminTheme.violet)),
+                ),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _sc(String label, String value, Color color, DynAdmin at) =>
+      Column(children: [
+        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color)),
+        const SizedBox(height: 2),
+        Text(label, style: at.label(11)),
+      ]);
+}
+
+// ─── Small widget showing which Firestore collection is being queried ───────
+class _CollectionBadge extends StatelessWidget {
+  final String filterRole;
+  const _CollectionBadge({required this.filterRole});
+
+  @override
+  Widget build(BuildContext context) {
+    final col = filterRole == 'all'
+        ? 'delivery_agents + managers + staff (all)'
+        : _label(filterRole);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AdminTheme.cyan.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AdminTheme.cyan.withValues(alpha: 0.2)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.storage_rounded, size: 12, color: AdminTheme.cyan),
+        const SizedBox(width: 6),
+        Text(
+          'Collection: $col',
+          style: const TextStyle(fontSize: 11, color: AdminTheme.cyan, fontWeight: FontWeight.w600),
+        ),
+      ]),
+    );
+  }
+
+  String _label(String role) {
+    switch (role) {
+      case 'delivery': return 'delivery_agents';
+      case 'manager':  return 'managers';
+      case 'staff':    return 'staff';
+      default:         return 'users';
+    }
+  }
+}
+

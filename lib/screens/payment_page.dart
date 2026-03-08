@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/notification_service.dart';
+import '../services/employee_notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dashboard.dart';
 import '../theme/app_theme.dart';
+import '../services/coupon_service.dart';
 
 // Razorpay is supported on Android/iOS only.
 // On Web we use a simulated checkout UI (redirect to Razorpay Standard Checkout).
 import 'package:razorpay_flutter/razorpay_flutter.dart'
     if (dart.library.html) '../services/razorpay_web_stub.dart';
+// Web helper functions (loadRazorpayScript / launchRazorpayWeb):
+// On web these come from razorpay_web_stub.dart (real implementations).
+// On mobile these come from razorpay_web_helpers_stub.dart (no-op stubs).
+import '../services/razorpay_web_helpers_stub.dart'
+    if (dart.library.html) '../services/razorpay_web_helpers_noop_stub.dart';
 
 // ════════════════════════════════════════════════════════════
 // PAYMENT PAGE — Online (UPI / Card / NetBanking) + COD
@@ -51,6 +59,16 @@ class _PaymentPageState extends State<PaymentPage> {
   String? _orderId;
   String _onlineOption = 'upi';
 
+  // ── Coupon state ─────────────────────────────────────────────
+  final _couponCtrl = TextEditingController();
+  bool _couponApplying = false;
+  String? _couponError;
+  String? _appliedCouponId;
+  Map<String, dynamic>? _appliedCouponData;
+  double _couponDiscount = 0.0;
+  double get _finalAmount =>
+      (_subtotal + 40.0 + _subtotal * 0.05 - _couponDiscount).clamp(0, double.infinity);
+
   // Razorpay (Android/iOS only)
   Razorpay? _razorpay;
   static const _razorpayTestKey = 'rzp_test_SNDjY1QDtZcqcg';
@@ -75,6 +93,7 @@ class _PaymentPageState extends State<PaymentPage> {
   @override
   void dispose() {
     _razorpay?.clear();
+    _couponCtrl.dispose();
     _upiCtrl.dispose();
     _cardNumberCtrl.dispose();
     _cardExpiryCtrl.dispose();
@@ -118,7 +137,9 @@ class _PaymentPageState extends State<PaymentPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _orderSummaryCard(),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            _couponSection(),
+            const SizedBox(height: 16),
             if (widget.paymentMethod == 'online') _onlineSection(),
             if (widget.paymentMethod == 'cod') _codSection(),
             const SizedBox(height: 32),
@@ -134,6 +155,182 @@ class _PaymentPageState extends State<PaymentPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // ── Coupon Section ────────────────────────────────────────────
+  Future<void> _applyCoupon() async {
+    final code = _couponCtrl.text.trim();
+    if (code.isEmpty) {
+      setState(() => _couponError = 'Enter a coupon code');
+      return;
+    }
+    setState(() { _couponApplying = true; _couponError = null; });
+    final result = await CouponService().applyCoupon(
+      code: code,
+      billTotal: widget.totalAmount,
+    );
+    if (!mounted) return;
+    if (result['valid'] == true) {
+      setState(() {
+        _couponDiscount    = (result['discountAmount'] as num).toDouble();
+        _appliedCouponId   = result['couponId'] as String?;
+        _appliedCouponData = result['couponData'] as Map<String, dynamic>?;
+        _couponApplying    = false;
+        _couponError       = null;
+      });
+    } else {
+      setState(() {
+        _couponDiscount  = 0;
+        _appliedCouponId = null;
+        _appliedCouponData = null;
+        _couponApplying  = false;
+        _couponError     = result['error'] as String? ?? 'Invalid coupon';
+      });
+    }
+  }
+
+  void _removeCoupon() {
+    setState(() {
+      _couponCtrl.clear();
+      _couponDiscount    = 0;
+      _appliedCouponId   = null;
+      _appliedCouponData = null;
+      _couponError       = null;
+    });
+  }
+
+  Widget _couponSection() {
+    final t = AppColors.of(context);
+    final applied = _appliedCouponId != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: applied ? AppColors.emerald.withValues(alpha: 0.5) : t.cardBdr,
+          width: applied ? 1.5 : 1,
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.local_offer_rounded,
+              color: applied ? AppColors.emerald : AppColors.gold, size: 18),
+          const SizedBox(width: 8),
+          Text('Coupon Code',
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w800, color: t.textHi)),
+          if (applied) ...[ const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  color: AppColors.emerald.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20)),
+              child: Text('APPLIED',
+                  style: const TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.w900,
+                      color: AppColors.emerald, letterSpacing: 1)),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _couponCtrl,
+              enabled: !applied,
+              textCapitalization: TextCapitalization.characters,
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w700,
+                  color: applied ? AppColors.emerald : t.textHi,
+                  letterSpacing: 1.5),
+              decoration: InputDecoration(
+                hintText: 'Enter coupon code',
+                hintStyle: TextStyle(color: t.textDim, fontWeight: FontWeight.w500),
+                filled: true,
+                fillColor: t.input,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: t.cardBdr)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: t.cardBdr)),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.gold, width: 1.5)),
+                suffixIcon: applied
+                    ? const Icon(Icons.check_circle_rounded,
+                        color: AppColors.emerald, size: 20)
+                    : null,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (applied)
+            GestureDetector(
+              onTap: _removeCoupon,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: AppColors.rose.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.rose.withValues(alpha: 0.3))),
+                child: const Icon(Icons.close_rounded,
+                    color: AppColors.rose, size: 20),
+              ),
+            )
+          else
+            GestureDetector(
+              onTap: _couponApplying ? null : _applyCoupon,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                    color: AppColors.gold,
+                    borderRadius: BorderRadius.circular(12)),
+                child: _couponApplying
+                    ? const SizedBox(width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Color(0xFF080F1E)))
+                    : const Text('APPLY',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w900,
+                            color: Color(0xFF080F1E), letterSpacing: 0.5)),
+              ),
+            ),
+        ]),
+        if (_couponError != null) ...[ const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.error_outline_rounded,
+                color: AppColors.rose, size: 14),
+            const SizedBox(width: 6),
+            Text(_couponError!,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.rose,
+                    fontWeight: FontWeight.w600)),
+          ]),
+        ],
+        if (applied && _couponDiscount > 0) ...[ const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+                color: AppColors.emerald.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: AppColors.emerald.withValues(alpha: 0.25))),
+            child: Row(children: [
+              const Icon(Icons.savings_rounded,
+                  color: AppColors.emerald, size: 16),
+              const SizedBox(width: 8),
+              Text('You save ₹${_couponDiscount.toStringAsFixed(0)} on this order!',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w700,
+                      color: AppColors.emerald)),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
 
@@ -186,14 +383,29 @@ class _PaymentPageState extends State<PaymentPage> {
         _billRow('Subtotal', _subtotal),
         _billRow('Delivery Fee', 40.0),
         _billRow('GST (5%)', _subtotal * 0.05),
+        if (_couponDiscount > 0) ...[
+          _billRow('Coupon Discount', -_couponDiscount,
+              valueColor: AppColors.emerald),
+        ],
         const Divider(height: 16),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('Total',
               style: TextStyle(
                   fontSize: 16, fontWeight: FontWeight.w900, color: t.textHi)),
-          Text('₹${widget.totalAmount.toStringAsFixed(0)}',
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w900, color: t.textHi)),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (_couponDiscount > 0)
+              Text('₹${widget.totalAmount.toStringAsFixed(0)}',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: t.textDim,
+                      decoration: TextDecoration.lineThrough)),
+            Text('₹${_finalAmount.toStringAsFixed(0)}',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: _couponDiscount > 0 ? AppColors.emerald : t.textHi)),
+          ]),
         ]),
         const SizedBox(height: 10),
         Container(
@@ -218,15 +430,21 @@ class _PaymentPageState extends State<PaymentPage> {
     );
   }
 
-  Widget _billRow(String label, double amount) {
+  Widget _billRow(String label, double amount, {Color? valueColor}) {
     final t = AppColors.of(context);
+    final isNegative = amount < 0;
+    final display = isNegative
+        ? '−₹${(-amount).toStringAsFixed(0)}'
+        : '₹${amount.toStringAsFixed(0)}';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(label, style: TextStyle(fontSize: 13, color: t.textMid)),
-        Text('₹${amount.toStringAsFixed(0)}',
+        Text(display,
             style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600, color: t.textHi)),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: valueColor ?? (isNegative ? AppColors.emerald : t.textHi))),
       ]),
     );
   }
@@ -251,6 +469,7 @@ class _PaymentPageState extends State<PaymentPage> {
       ]);
 
   Widget _optionTab(String value, String label, IconData icon) {
+    final t = AppColors.of(context);
     final active = _onlineOption == value;
     return Expanded(
       child: GestureDetector(
@@ -259,10 +478,10 @@ class _PaymentPageState extends State<PaymentPage> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: active ? _gold.withValues(alpha: 0.15) : Colors.white,
+            color: active ? _gold.withValues(alpha: 0.15) : t.card,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-                color: active ? _gold : const Color(0xFFE8EDF5),
+                color: active ? _gold : t.cardBdr,
                 width: active ? 1.5 : 1),
           ),
           child: Column(children: [
@@ -317,9 +536,9 @@ class _PaymentPageState extends State<PaymentPage> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                        color: const Color(0xFFF0F4FF),
+                        color: AppColors.of(context).surface,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFE8EDF5))),
+                        border: Border.all(color: AppColors.of(context).cardBdr)),
                     child: Text(app,
                         style: const TextStyle(
                             fontSize: 12,
@@ -407,21 +626,24 @@ class _PaymentPageState extends State<PaymentPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFF0F4FF),
+                      color: AppColors.of(context).surface,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFE8EDF5))),
+                      border: Border.all(color: AppColors.of(context).cardBdr)),
                   child: Text(b,
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600,
+                          color: AppColors.of(context).textHi)),
                 );
               }).toList()),
         ]),
       );
 
-  Widget _codSection() => Container(
+  Widget _codSection() {
+    final t = AppColors.of(context);
+    return Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: t.card,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: const Color(0xFFD1FAE5)),
           boxShadow: [
@@ -469,6 +691,7 @@ class _PaymentPageState extends State<PaymentPage> {
           ),
         ]),
       );
+  }
 
   Widget _payButton() => SizedBox(
         width: double.infinity,
@@ -498,7 +721,7 @@ class _PaymentPageState extends State<PaymentPage> {
                   Text(
                     widget.paymentMethod == 'cod'
                         ? 'CONFIRM ORDER'
-                        : 'PAY ₹${widget.totalAmount.toStringAsFixed(0)}',
+                        : 'PAY ₹${_finalAmount.toStringAsFixed(0)}',
                     style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
@@ -602,24 +825,26 @@ class _PaymentPageState extends State<PaymentPage> {
   }
 
   InputDecoration _inputDeco(String hint, IconData icon,
-          {bool counter = true}) =>
-      InputDecoration(
+          {bool counter = true}) {
+    final t = AppColors.of(context);
+    return InputDecoration(
         hintText: hint,
-        prefixIcon: Icon(icon, size: 18, color: const Color(0xFF94A3B8)),
+        prefixIcon: Icon(icon, size: 18, color: t.textDim),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE8EDF5))),
+            borderSide: BorderSide(color: t.cardBdr)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE8EDF5))),
+            borderSide: BorderSide(color: t.cardBdr)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: _gold, width: 1.5)),
         filled: true,
-        fillColor: const Color(0xFFF8FAFF),
+        fillColor: t.input,
         isDense: true,
         counterText: counter ? null : '',
       );
+  }
 
   // ── Razorpay Handlers (Android/iOS only) ──────────────────────
   void _handleRazorpaySuccess(PaymentSuccessResponse response) {
@@ -683,22 +908,44 @@ class _PaymentPageState extends State<PaymentPage> {
     }
   }
 
+  /// Real Razorpay Standard Checkout for Web.
+  /// Injects the Razorpay JS SDK into the page and opens the payment modal.
+  /// On success, writes order to Firestore. On failure, shows error.
+  /// Free to use — Razorpay charges only on successful transactions (no monthly fee).
   Future<void> _simulateWebPayment() async {
-    // Web: simulated payment flow (order is written to Firestore)
-    // For full web Razorpay checkout, use Standard Checkout JS SDK:
-    // https://razorpay.com/docs/payment-gateway/web-integration/standard/
-    // with key: _razorpayTestKey
-    await Future.delayed(const Duration(milliseconds: 1500));
+    // Use dart:js to call Razorpay Standard Checkout JS SDK
+    // The JS SDK is loaded lazily via a <script> tag we inject.
+    try {
+      // ignore: undefined_prefixed_name, avoid_web_libraries_in_flutter
+      await loadRazorpayScript();
+    } catch (_) {}
+
     if (!mounted) return;
-    await _writeOrderToFirestore(
-        razorpayPaymentId: 'web_sim_${DateTime.now().millisecondsSinceEpoch}');
+
+    final user = FirebaseAuth.instance.currentUser;
+    await launchRazorpayWeb(
+      key: _razorpayTestKey,
+      amount: (_finalAmount * 100).toInt(),
+      name: 'Laundrify',
+      description: 'Laundry Service - ${widget.totalItems} items',
+      email: user?.email ?? '',
+      onSuccess: (paymentId) async {
+        if (!mounted) return;
+        await _writeOrderToFirestore(razorpayPaymentId: paymentId);
+      },
+      onFailure: (msg) {
+        if (!mounted) return;
+        setState(() => _isProcessing = false);
+        _snack('Payment failed: $msg');
+      },
+    );
   }
 
   void _openRazorpay() {
     final user = FirebaseAuth.instance.currentUser;
     final options = <String, dynamic>{
       'key': _razorpayTestKey,
-      'amount': (widget.totalAmount * 100).toInt(),
+      'amount': (_finalAmount * 100).toInt(),
       'name': 'Laundrify',
       'description': 'Laundry Service - ${widget.totalItems} items',
       'currency': 'INR',
@@ -776,6 +1023,7 @@ class _PaymentPageState extends State<PaymentPage> {
       final subtotal = _subtotal;
       final deliveryFee = 40.0;
       final gst = subtotal * 0.05;
+      final finalTotal = _finalAmount;
 
       final docRef = await db.collection('orders').add({
         'userId': user.uid,
@@ -789,9 +1037,17 @@ class _PaymentPageState extends State<PaymentPage> {
         'subtotal': subtotal,
         'deliveryFee': deliveryFee,
         'gst': gst,
-        'total': widget.totalAmount,
-        'totalAmount': widget.totalAmount,
-        'grandTotal': widget.totalAmount,
+        'total': finalTotal,
+        'totalAmount': finalTotal,
+        'grandTotal': finalTotal,
+        'originalTotal': widget.totalAmount,
+        // Coupon info (if applied)
+        if (_appliedCouponId != null) ...{
+          'couponId':       _appliedCouponId!,
+          'couponCode':     _appliedCouponData?['code'] ?? _couponCtrl.text.trim().toUpperCase(),
+          'couponDiscount': _couponDiscount,
+          'couponTitle':    _appliedCouponData?['title'] ?? '',
+        },
         'totalItems': widget.totalItems,
         // Address
         'address': userAddress,
@@ -826,11 +1082,11 @@ class _PaymentPageState extends State<PaymentPage> {
 
       // Update loyalty points and user stats — wrapped so a permission issue won't fail the order
       try {
-        final pts = (widget.totalAmount / 10).floor();
+        final pts = (finalTotal / 10).floor();
         await db.collection('users').doc(user.uid).update({
           'loyaltyPoints': FieldValue.increment(pts),
           'totalOrders': FieldValue.increment(1),
-          'totalSpent': FieldValue.increment(widget.totalAmount),
+          'totalSpent': FieldValue.increment(finalTotal),
         });
         await db
             .collection('users')
@@ -847,19 +1103,69 @@ class _PaymentPageState extends State<PaymentPage> {
         debugPrint('Loyalty update skipped (non-fatal): $loyaltyErr');
       }
       try {
-        await db.collection('notifications').add({
+        // Write to user's notification subcollection (picked up by Firestore watcher)
+        // AND to top-level (for admin visibility)
+        final notifData = {
           'title': 'Order Confirmed! 🎉',
-          'message':
-              'Your order #${docRef.id.substring(0, 6).toUpperCase()} has been placed successfully.',
+          'body':
+              'Your order #${docRef.id.substring(0, 6).toUpperCase()} has been placed successfully. We\'ll pick it up soon!',
           'userId': user.uid,
           'orderId': docRef.id,
           'type': 'order_update',
           'createdAt': FieldValue.serverTimestamp(),
           'isRead': false,
+        };
+        await db
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .add(notifData);
+        await db.collection('notifications').add({
+          ...notifData,
+          'message': notifData['body'],
+          'targetGroup': 'user',
         });
       } catch (notifErr) {
         debugPrint('Notification write skipped (non-fatal): $notifErr');
       }
+
+      // Mark coupon as used (non-fatal if it fails)
+      if (_appliedCouponId != null) {
+        final isGlobal = (_appliedCouponData?['isActive'] != null) ||
+            (_appliedCouponData != null && !_appliedCouponData!.containsKey('status'));
+        CouponService().markCouponUsed(
+          couponId:               _appliedCouponId!,
+          isGlobal:               isGlobal,
+          appliedOrderTotal:      widget.totalAmount,
+          appliedDiscountAmount:  _couponDiscount,
+          orderId:                docRef.id,
+        );
+      }
+
+      // Fire local notification immediately — no FCM needed
+      try {
+        final method = widget.paymentMethod == 'cod' ? 'Cash on Delivery' : 'Online';
+        NotificationService().showOrderNotification(
+          title: '✅ Order Placed Successfully!',
+          body: 'Order #${docRef.id.substring(0, 6).toUpperCase()} confirmed via $method. We\'ll pick it up soon!',
+          orderId: docRef.id,
+        );
+      } catch (_) {}
+
+      // Send order confirmation email
+      try {
+        final u = FirebaseAuth.instance.currentUser;
+        if (u?.email != null) {
+          EmployeeNotificationService().sendOrderConfirmationEmail(
+            name: u?.displayName ?? 'Customer',
+            email: u!.email!,
+            orderId: docRef.id,
+            amount: _finalAmount,
+            pickupDate: widget.pickupDate,
+            paymentMethod: widget.paymentMethod,
+          );
+        }
+      } catch (_) {}
 
       if (mounted) {
         setState(() {

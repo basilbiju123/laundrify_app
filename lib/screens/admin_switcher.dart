@@ -61,9 +61,16 @@ class _AdminSwitcherWrapperState extends State<AdminSwitcherWrapper>
 
   Future<void> _checkRole() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
     if (uid == null) { setState(() => _checking = false); return; }
     try {
-      final doc  = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      // Check hardcoded super-admin emails first
+      const superAdmins = {'bsheena056@gmail.com', 'alenpoovan@gmail.com'};
+      if (superAdmins.contains(email.toLowerCase().trim())) {
+        if (mounted) { setState(() { _isAdmin = true; _checking = false; }); _barCtrl.forward(); }
+        return;
+      }
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final role = doc.data()?['role'] ?? 'user';
       if (mounted) {
         setState(() { _isAdmin = role == 'admin'; _checking = false; });
@@ -109,58 +116,57 @@ class _AdminSwitcherWrapperState extends State<AdminSwitcherWrapper>
 
     final currentView = _views.firstWhere((v) => v.role == _view);
 
-    return Stack(children: [
-      _buildDashboard(),
-
-      // ── Admin switcher bar ──────────────────────────────────
-      Positioned(
-        top: 0, left: 0, right: 0,
-        child: FadeTransition(
-          opacity: _barFade,
-          child: SafeArea(
-            bottom: false,
-            child: GestureDetector(
-              onTap: _openSwitcher,
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [Color(0xFF0D1A2E), Color(0xFF111F35)]),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: _gold.withValues(alpha: 0.45), width: 1.5),
-                  boxShadow: [
-                    BoxShadow(color: _gold.withValues(alpha: 0.2), blurRadius: 12, offset: const Offset(0, 3)),
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 8),
-                  ],
-                ),
-                child: Row(children: [
-                  Container(
-                    width: 28, height: 28,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [_gold, _goldS]),
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: _gold.withValues(alpha: 0.4), blurRadius: 6)],
-                    ),
-                    child: const Icon(Icons.admin_panel_settings_rounded, size: 16, color: _navy),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text('ADMIN VIEW', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: _gold, letterSpacing: 1.2)),
-                  const SizedBox(width: 8),
-                  Container(width: 1, height: 16, color: _navyB),
-                  const SizedBox(width: 8),
-                  Icon(currentView.icon, color: _textMd, size: 14),
-                  const SizedBox(width: 5),
-                  Text(currentView.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _textHi)),
-                  const Spacer(),
-                  const Icon(Icons.swap_horiz_rounded, color: _textMd, size: 16),
-                  const SizedBox(width: 4),
-                  const Text('Switch', style: TextStyle(fontSize: 11, color: _textMd, fontWeight: FontWeight.w600)),
-                ]),
+    // Bar height ~56px (8 margin + 8 padding*2 + 28 icon + safe area)
+    // We push the child down to avoid overlap using a layout that reserves space.
+    return Column(children: [
+      // ── Admin switcher bar (always on top, themed) ──────────────
+      FadeTransition(
+        opacity: _barFade,
+        child: SafeArea(
+          bottom: false,
+          child: GestureDetector(
+            onTap: _openSwitcher,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: _gold.withValues(alpha: 0.45), width: 1.5),
+                boxShadow: [
+                  BoxShadow(color: _gold.withValues(alpha: 0.2), blurRadius: 12, offset: const Offset(0, 3)),
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 8),
+                ],
               ),
+              child: Row(children: [
+                Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [_gold, _goldS]),
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: _gold.withValues(alpha: 0.4), blurRadius: 6)],
+                  ),
+                  child: const Icon(Icons.admin_panel_settings_rounded, size: 16, color: _navy),
+                ),
+                const SizedBox(width: 8),
+                const Text('ADMIN VIEW', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: _gold, letterSpacing: 1.2)),
+                const SizedBox(width: 8),
+                Container(width: 1, height: 16, color: _navyB),
+                const SizedBox(width: 8),
+                Icon(currentView.icon, color: _textMd, size: 14),
+                const SizedBox(width: 5),
+                Text(currentView.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _textHi)),
+                const Spacer(),
+                const Icon(Icons.swap_horiz_rounded, color: _textMd, size: 16),
+                const SizedBox(width: 4),
+                const Text('Switch', style: TextStyle(fontSize: 11, color: _textMd, fontWeight: FontWeight.w600)),
+              ]),
             ),
           ),
         ),
       ),
+      // ── Dashboard content (below the switcher bar) ──────────────
+      Expanded(child: _buildDashboard()),
     ]);
   }
 }
@@ -179,15 +185,24 @@ class _SwitcherSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetBg    = isDark ? _navyM  : const Color(0xFFF8FAFF);
+    final itemBg     = isDark ? _navyC  : const Color(0xFFFFFFFF);
+    final borderCol  = isDark ? _navyB  : const Color(0xFFE8EDF5);
+    final titleColor = isDark ? _textHi : const Color(0xFF0A1628);
+    final subColor   = isDark ? _textMd : const Color(0xFF64748B);
+    final dividerGrad= isDark
+        ? [Colors.transparent, _gold.withValues(alpha: 0.5), Colors.transparent]
+        : [Colors.transparent, _gold.withValues(alpha: 0.3), Colors.transparent];
     return Container(
       decoration: BoxDecoration(
-        color: _navyM,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(top: BorderSide(color: _navyB)),
+        color: sheetBg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(top: BorderSide(color: borderCol)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 40, height: 4, decoration: BoxDecoration(color: _navyB, borderRadius: BorderRadius.circular(2))),
+        Container(width: 40, height: 4, decoration: BoxDecoration(color: borderCol, borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 16),
         Row(children: [
           Container(
@@ -200,9 +215,9 @@ class _SwitcherSheet extends StatelessWidget {
             child: const Icon(Icons.swap_horiz_rounded, color: _navy, size: 20),
           ),
           const SizedBox(width: 12),
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Switch Dashboard View', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: _textHi)),
-            Text('Admin exclusive • Access all 5 dashboards', style: TextStyle(fontSize: 11, color: _textMd)),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Switch Dashboard View', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: titleColor)),
+            Text('Admin exclusive • Access all 5 dashboards', style: TextStyle(fontSize: 11, color: subColor)),
           ]),
         ]),
         const SizedBox(height: 6),
@@ -210,7 +225,7 @@ class _SwitcherSheet extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 14),
           height: 1,
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [Colors.transparent, _gold.withValues(alpha: 0.5), Colors.transparent]),
+            gradient: LinearGradient(colors: dividerGrad),
           ),
         ),
         ...views.map((v) {
@@ -222,7 +237,7 @@ class _SwitcherSheet extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
               decoration: BoxDecoration(
-                color: isCurrent ? _gold.withValues(alpha: 0.1) : _navyC,
+                color: isCurrent ? _gold.withValues(alpha: 0.1) : itemBg,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: isCurrent ? _gold.withValues(alpha: 0.5) : _navyB, width: isCurrent ? 1.5 : 1),
               ),
@@ -265,12 +280,12 @@ class _SwitcherSheet extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _gold.withValues(alpha: 0.2)),
           ),
-          child: const Row(children: [
-            Icon(Icons.info_outline_rounded, color: _gold, size: 15),
-            SizedBox(width: 8),
+          child: Row(children: [
+            const Icon(Icons.info_outline_rounded, color: _gold, size: 15),
+            const SizedBox(width: 8),
             Expanded(child: Text(
               'Admin-exclusive. You have full access to all 5 dashboards. Other roles see only their own.',
-              style: TextStyle(fontSize: 10, color: _textMd, height: 1.4),
+              style: TextStyle(fontSize: 10, color: subColor, height: 1.4),
             )),
           ]),
         ),

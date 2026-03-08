@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
+import 'otp_page.dart';
 import '../theme/app_theme.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -56,17 +57,91 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _saveProfile() async {
     setState(() => _isSaving = true);
     try {
-      await _authService.updateUserProfile(name: _nameCtrl.text.trim());
       final uid = _auth.currentUser?.uid;
+      final newPhone = _phoneCtrl.text.trim();
+      final oldPhone = _userData['phone'] ?? '';
+      final phoneChanged = newPhone.isNotEmpty && newPhone != oldPhone;
+
+      // Save name immediately
+      await _authService.updateUserProfile(name: _nameCtrl.text.trim());
       if (uid != null) {
-        await _db.collection('users').doc(uid).update({
-          'name': _nameCtrl.text.trim(),
-          'phone': _phoneCtrl.text.trim(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+        // Update /users (customers) - for employees this may not exist but is harmless
+        try {
+          await _db.collection('users').doc(uid).update({
+            'name': _nameCtrl.text.trim(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
+        // Also update role collections (for employees)
+        for (final col in ['delivery_agents', 'managers', 'staff']) {
+          try {
+            final doc = await _db.collection(col).doc(uid).get();
+            if (doc.exists) {
+              await _db.collection(col).doc(uid).update({
+                'name': _nameCtrl.text.trim(),
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+              break; // Found in one collection, stop
+            }
+          } catch (_) {}
+        }
       }
+
+      if (mounted) setState(() => _isEditing = false);
+
+      // If phone changed → verify via OTP before saving
+      if (phoneChanged) {
+        if (!mounted) return;
+        final formatted = newPhone.startsWith('+') ? newPhone : '+91$newPhone';
+        setState(() => _isSaving = true);
+        await AuthService().verifyPhoneNumber(
+          phoneNumber: formatted,
+          onCodeSent: (verificationId) {
+            if (!mounted) return;
+            setState(() => _isSaving = false);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => OtpPage(
+                  phone: formatted,
+                  verificationId: verificationId,
+                  isPhoneUpdate: true,
+                ),
+              ),
+            ).then((_) {
+              // After OTP verified, save phone to Firestore
+              if (uid != null) {
+                _db.collection('users').doc(uid).update({
+                  'phone': formatted,
+                  'phoneVerified': true,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                });
+              }
+              _loadProfile(); // Refresh
+            });
+          },
+          onError: (error) {
+            if (!mounted) return;
+            setState(() => _isSaving = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(error), backgroundColor: Colors.red),
+            );
+          },
+          onAutoVerify: (user) {
+            if (uid != null) {
+              _db.collection('users').doc(uid).update({
+                'phone': formatted,
+                'phoneVerified': true,
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+            }
+            _loadProfile();
+          },
+        );
+        return;
+      }
+
       if (mounted) {
-        setState(() => _isEditing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ Profile updated'),
@@ -78,7 +153,7 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: \$e'), backgroundColor: Colors.red),
         );
       }
     } finally {

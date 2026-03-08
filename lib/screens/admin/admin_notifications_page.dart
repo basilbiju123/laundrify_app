@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../services/notification_service.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'admin_theme.dart';
 
@@ -38,6 +41,8 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
     final message = _msgCtrl.text.trim();
     if (title.isEmpty || message.isEmpty) return;
     setState(() => _isSending = true);
+
+
     try {
       // 1. Write to Firestore → shows in in-app notification bell
       await _db.collection('notifications').add({
@@ -48,46 +53,84 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
         'sentBy': 'admin',
         'isRead': false,
       });
+      // Fire local notification on admin's device immediately (demo-ready)
+      NotificationService().showOrderNotification(
+        title: '📣 $title',
+        body: message,
+      );
 
-      // 2. Send FCM topic push → shows on device lock screen
-      // FCM topic push is handled server-side via Cloud Functions.
-      // The Firestore write above triggers a Cloud Function (if deployed)
-      // that calls FCM sendToTopic. The topic name is stored so the
-      // function knows which topic to target.
-      //
-      // If you haven't deployed Cloud Functions yet, devices will still
-      // see the notification inside the app via the Firestore listener.
-      //
-      // To deploy: see /functions/index.js in your Firebase project.
-      // The function listens to notifications collection onCreate and
-      // sends an FCM message to the topic stored in targetGroup.
+      // 2. Send lock-screen push via OneSignal REST API (FREE — no Cloud Functions needed)
+      bool pushSent = false;
+      try {
+        final settingsDoc = await _db.collection('app_settings').doc('admin').get();
+        final restApiKey = settingsDoc.data()?['oneSignalRestApiKey'] as String? ?? '';
+        if (restApiKey.isNotEmpty) {
+          pushSent = await NotificationService.sendPushToSegment(
+            title: title,
+            message: message,
+            targetGroup: _targetGroup,
+            data: {'type': 'broadcast', 'targetGroup': _targetGroup},
+          );
+          // Override with correct API key at runtime
+          if (!pushSent) {
+            final body = <String, dynamic>{
+              'app_id': '92ab5f14-7803-43d2-b8b8-47a11527a89a',
+              'headings': {'en': title},
+              'contents': {'en': message},
+              'data': {'type': 'broadcast'},
+            };
+            if (_targetGroup == 'all') {
+              body['included_segments'] = ['Subscribed Users'];
+            } else {
+              final roleMap = {'users':'user','delivery':'delivery','managers':'manager','staff':'staff'};
+              body['filters'] = [{'field':'tag','key':'role','relation':'=','value': roleMap[_targetGroup] ?? _targetGroup}];
+            }
+            final resp = await http.post(
+              Uri.parse('https://onesignal.com/api/v1/notifications'),
+              headers: {'Content-Type': 'application/json', 'Authorization': 'Basic $restApiKey'},
+              body: jsonEncode(body),
+            );
+            pushSent = resp.statusCode == 200;
+          }
+        }
+      } catch (_) {
+        // OneSignal push is best-effort — in-app delivery still works
+      }
 
       _titleCtrl.clear(); _msgCtrl.clear();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-            const SizedBox(width: 10),
-            Expanded(child: Text(
-              'Sent to ${_targetGroup == 'all' ? 'all users' : _targetGroup} — in-app ✓, lock-screen via Cloud Functions',
-              style: const TextStyle(fontSize: 12),
-            )),
-          ]),
-          backgroundColor: AdminTheme.emerald,
-          behavior: SnackBarBehavior.floating,
-        ),
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                'Sent to \${_targetGroup == "all" ? "all users" : _targetGroup} — in-app ✓'
+                '\${pushSent ? ", lock-screen ✓" : " (add FCM key in Settings for lock-screen push)"}',
+                style: const TextStyle(fontSize: 12),
+              )),
+            ]),
+            backgroundColor: AdminTheme.emerald,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: AdminTheme.rose, behavior: SnackBarBehavior.floating));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: \$e'), backgroundColor: AdminTheme.rose, behavior: SnackBarBehavior.floating),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isSending = false);
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
       physics: const BouncingScrollPhysics(),
@@ -100,36 +143,36 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
           // COMPOSE CARD
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: AdminTheme.cardDecoration(glow: true),
+            decoration: at.cardDecoration(glow: true),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(children: [
                   Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AdminTheme.gold.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.notifications_rounded, color: AdminTheme.gold, size: 22)),
                   const SizedBox(width: 12),
-                  Text('Compose Notification', style: AdminTheme.heading(16)),
+                  Text('Compose Notification', style: at.heading(16)),
                 ]),
                 const SizedBox(height: 20),
 
-                _buildField(_titleCtrl, 'Notification Title', Icons.title_rounded),
+                _buildField(context, _titleCtrl, 'Notification Title', Icons.title_rounded),
                 const SizedBox(height: 14),
                 TextField(
                   controller: _msgCtrl, maxLines: 4,
-                  style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
+                  style: TextStyle(color: at.textPrimary, fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: 'Enter your message...', hintStyle: AdminTheme.label(14),
+                    hintText: 'Enter your message...', hintStyle: at.label(14),
                     alignLabelWithHint: true,
-                    prefixIcon: const Padding(padding: EdgeInsets.only(bottom: 60), child: Icon(Icons.message_rounded, color: AdminTheme.textSecondary, size: 20)),
-                    filled: true, fillColor: AdminTheme.bg,
+                    prefixIcon: Padding(padding: const EdgeInsets.only(bottom: 60), child: Icon(Icons.message_rounded, color: at.textSecondary, size: 20)),
+                    filled: true, fillColor: at.bg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: at.cardBorder)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: at.cardBorder)),
                     focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AdminTheme.gold, width: 2)),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                Text('Target Group', style: AdminTheme.label(13)),
+                Text('Target Group', style: at.label(13)),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8, runSpacing: 8,
@@ -141,15 +184,15 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                         duration: const Duration(milliseconds: 200),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
-                          color: active ? AdminTheme.gold.withValues(alpha: 0.2) : AdminTheme.card,
+                          color: active ? AdminTheme.gold.withValues(alpha: 0.2) : at.card,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: active ? AdminTheme.gold : AdminTheme.cardBorder, width: active ? 1.5 : 1),
+                          border: Border.all(color: active ? AdminTheme.gold : at.cardBorder, width: active ? 1.5 : 1),
                         ),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Icon(g == 'all' ? Icons.groups_rounded : g == 'users' ? Icons.person_rounded : g == 'delivery' ? Icons.delivery_dining_rounded : Icons.manage_accounts_rounded,
-                              color: active ? AdminTheme.gold : AdminTheme.textSecondary, size: 14),
+                              color: active ? AdminTheme.gold : at.textSecondary, size: 14),
                           const SizedBox(width: 6),
-                          Text(g.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: active ? AdminTheme.gold : AdminTheme.textSecondary)),
+                          Text(g.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: active ? AdminTheme.gold : at.textSecondary)),
                         ]),
                       ),
                     );
@@ -177,14 +220,14 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
 
           const SizedBox(height: 24),
 
-          Text('Recent Notifications', style: AdminTheme.heading(16)),
+          Text('Recent Notifications', style: at.heading(16)),
           const SizedBox(height: 16),
 
           StreamBuilder<QuerySnapshot>(
             stream: _db.collection('notifications').limit(20).snapshots(),
             builder: (ctx, snap) {
               if (!snap.hasData) return const Center(child: CircularProgressIndicator(color: AdminTheme.gold, strokeWidth: 2));
-              if (snap.data!.docs.isEmpty) return Center(child: Text('No notifications sent yet', style: AdminTheme.label(13)));
+              if (snap.data!.docs.isEmpty) return Center(child: Text('No notifications sent yet', style: at.label(13)));
               final docs = [...snap.data!.docs]..sort((a, b) {
                 final ta = ((a.data() as Map)['createdAt'] as Timestamp?);
                 final tb = ((b.data() as Map)['createdAt'] as Timestamp?);
@@ -201,7 +244,7 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(16),
-                    decoration: AdminTheme.cardDecoration(),
+                    decoration: at.cardDecoration(),
                     child: Row(
                       children: [
                         Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AdminTheme.gold.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.notifications_rounded, color: AdminTheme.gold, size: 18)),
@@ -210,14 +253,14 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(d['title'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AdminTheme.textPrimary)),
+                              Text(d['title'] ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: at.textPrimary)),
                               const SizedBox(height: 4),
-                              Text(d['message'] ?? '', style: AdminTheme.label(12), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              Text(d['message'] ?? '', style: at.label(12), maxLines: 2, overflow: TextOverflow.ellipsis),
                               const SizedBox(height: 4),
                               Row(children: [
                                 AdminBadge(label: d['targetGroup'] ?? 'all', color: AdminTheme.gold, fontSize: 9),
                                 const SizedBox(width: 8),
-                                if (ts != null) Text('${ts.day}/${ts.month} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}', style: AdminTheme.label(10).copyWith(color: AdminTheme.textMuted)),
+                                if (ts != null) Text('${ts.day}/${ts.month} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}', style: at.label(10).copyWith(color: at.textMuted)),
                               ]),
                             ],
                           ),
@@ -234,17 +277,18 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
     );
   }
 
-  Widget _buildField(TextEditingController ctrl, String label, IconData icon) {
+  Widget _buildField(BuildContext ctx, TextEditingController ctrl, String label, IconData icon) {
+    final at = DynAdmin.of(ctx);
     return TextField(
       controller: ctrl,
-      style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
+      style: TextStyle(color: at.textPrimary, fontSize: 14),
       decoration: InputDecoration(
-        labelText: label, labelStyle: AdminTheme.label(13),
-        prefixIcon: Icon(icon, color: AdminTheme.textSecondary, size: 20),
-        filled: true, fillColor: AdminTheme.bg,
+        labelText: label, labelStyle: at.label(13),
+        prefixIcon: Icon(icon, color: at.textSecondary, size: 20),
+        filled: true, fillColor: at.bg,
         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AdminTheme.cardBorder)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: at.cardBorder)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: at.cardBorder)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AdminTheme.gold, width: 2)),
       ),
     );

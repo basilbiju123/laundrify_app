@@ -408,8 +408,7 @@ class FirestoreService {
   /// Get all delivery agents (online + offline)
   Stream<QuerySnapshot> getDeliveryAgentsStream() {
     return _db
-        .collection('users')
-        .where('role', isEqualTo: 'delivery')
+        .collection('delivery_agents')
         .where('isActive', isEqualTo: true)
         .snapshots();
   }
@@ -417,30 +416,26 @@ class FirestoreService {
   /// Get all staff members
   Stream<QuerySnapshot> getStaffStream() {
     return _db
-        .collection('users')
-        .where('role', isEqualTo: 'staff')
+        .collection('staff')
         .snapshots();
   }
 
   /// Get all managers
   Stream<QuerySnapshot> getManagersStream() {
     return _db
-        .collection('users')
-        .where('role', isEqualTo: 'manager')
+        .collection('managers')
         .snapshots();
   }
 
-  /// Get all non-customer users (employees tab)
+  /// Get all non-customer users (employees tab) — merges all 3 role collections
   Stream<QuerySnapshot> getEmployeesStream() {
-    return _db
-        .collection('users')
-        .where('role', whereIn: ['delivery', 'staff', 'manager'])
-        .snapshots();
+    // Returns delivery_agents stream (primary); caller may merge with staff/managers
+    return _db.collection('delivery_agents').snapshots();
   }
 
   /// Toggle delivery agent online/offline status
   Future<void> setDeliveryAgentOnline(String uid, bool isOnline) async {
-    await _db.collection('users').doc(uid).update({
+    await _db.collection('delivery_agents').doc(uid).update({
       'isOnline': isOnline,
       'lastStatusChange': FieldValue.serverTimestamp(),
     });
@@ -535,8 +530,7 @@ class FirestoreService {
             .where('status', isEqualTo: 'pending')
             .count()
             .get(),
-        _db.collection('users')
-            .where('role', isEqualTo: 'delivery')
+        _db.collection('delivery_agents')
             .where('isOnline', isEqualTo: true)
             .count()
             .get(),

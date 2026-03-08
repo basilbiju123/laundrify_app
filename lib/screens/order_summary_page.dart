@@ -112,6 +112,59 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   double get gst => subtotal * 0.05;
   double get total => subtotal + deliveryFee + gst;
 
+  // ── Save incomplete order for later ────────────────────────
+  Future<void> _saveCartForLater(BuildContext context) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    if (_serviceMap.isEmpty || totalItems == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Add at least one item before saving'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    try {
+      final services = _serviceMap.entries.map((e) => {
+            'serviceName': e.key,
+            'title': e.key,
+            'items': e.value,
+          }).toList();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('abandoned_carts')
+          .add({
+        'services': services,
+        'totalAmount': total,
+        'totalItems': totalItems,
+        'status': 'saved',
+        'saveType': 'incomplete', // distinguish from payment-failed carts
+        'createdAt': FieldValue.serverTimestamp(),
+        'pickupDate': '',
+        'pickupTime': '',
+        'paymentMethod': 'online',
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Row(children: [
+            Icon(Icons.bookmark_added_rounded, color: Colors.white, size: 16),
+            SizedBox(width: 8),
+            Text('Cart saved! Find it under Saved Carts.'),
+          ]),
+          backgroundColor: const Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
+    }
+  }
+
   // ── Navigate to service page, await Navigator.pop result ──
   // Each service page MUST call:
   //   Navigator.pop(context, {'serviceName': 'Laundry', 'items': items.where((i)=>i['qty']>0).toList()});
@@ -153,6 +206,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
 
   Future<void> _bookNow() async {
     // Check if user has a saved location before allowing order placement
+    final t = AppColors.of(context);
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -176,7 +230,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
           builder: (ctx) => AlertDialog(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            backgroundColor: Colors.white,
+            backgroundColor: t.card,
             title: const Row(
               children: [
                 Icon(Icons.location_off_rounded,
@@ -241,6 +295,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
   }
 
   void _showAddServiceSheet() {
+    final t = AppColors.of(context);
     final svcList = [
       (
         'Laundry',
@@ -287,7 +342,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.62,
         decoration: BoxDecoration(
-            color: Colors.white,
+            color: t.card,
             borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
         child: Column(children: [
           Container(
@@ -337,7 +392,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                   onTap: () => _openService(name, page),
                   child: Container(
                     decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: t.card,
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                             color: added
@@ -372,7 +427,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                                           color: _oGreen,
                                           shape: BoxShape.circle,
                                           border: Border.all(
-                                              color: Colors.white, width: 2)),
+                                              color: t.card, width: 2)),
                                       child: const Icon(Icons.check_rounded,
                                           color: Colors.white, size: 10))),
                           ]),
@@ -436,6 +491,12 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                 fontWeight: FontWeight.w900,
                 fontSize: 20)),
         actions: [
+          // Save cart for later
+          IconButton(
+            tooltip: 'Save for Later',
+            icon: const Icon(Icons.bookmark_add_outlined, color: Colors.white, size: 22),
+            onPressed: () => _saveCartForLater(context),
+          ),
           if (_serviceMap.length > 1)
             Container(
                 margin: const EdgeInsets.only(right: 16),
@@ -476,7 +537,7 @@ class _OrderSummaryPageState extends State<OrderSummaryPage> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: t.card,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                             color: _oBlue.withValues(alpha: 0.25), width: 1.5),

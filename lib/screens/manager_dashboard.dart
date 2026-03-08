@@ -1,4 +1,5 @@
 import 'auth_options_page.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -81,8 +82,7 @@ class _ManagerDashboardState extends State<ManagerDashboard>
             .count()
             .get(),
         _db
-            .collection('users')
-            .where('role', isEqualTo: 'delivery')
+            .collection('delivery_agents')
             .where('isOnline', isEqualTo: true)
             .count()
             .get(),
@@ -104,65 +104,70 @@ class _ManagerDashboardState extends State<ManagerDashboard>
 
   @override
   Widget build(BuildContext context) {
-    final lt = DynTheme.of(context);
     final user = _auth.currentUser;
     final name = user?.displayName ?? 'Manager';
-
-    final content = AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: lt.bg,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(name),
-              _buildStatsRow(),
-              _buildTabBar(),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabCtrl,
+    return PanelThemeScope(
+      panelKey: 'manager',
+      child: Builder(
+        builder: (ctx) {
+          final lt = DynTheme.of(ctx);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle.light,
+            child: Scaffold(
+              backgroundColor: lt.bg,
+              body: SafeArea(
+                child: Column(
                   children: [
-                    _OrdersTab(
-                      db: _db,
-                      statuses: const ['pending'],
-                      label: 'pending',
-                      emptyIcon: Icons.pending_actions_outlined,
+                    _buildHeader(ctx, name),
+                    _buildStatsRow(ctx),
+                    _buildTabBar(ctx),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabCtrl,
+                        children: [
+                          _OrdersTab(
+                            db: _db,
+                            statuses: const ['pending'],
+                            label: 'pending',
+                            emptyIcon: Icons.pending_actions_outlined,
+                          ),
+                          _OrdersTab(
+                            db: _db,
+                            statuses: const [
+                              'assigned',
+                              'accepted',
+                              'pickup',
+                              'processing',
+                              'out_for_delivery',
+                              'reached',
+                              'picked'
+                            ],
+                            label: 'active',
+                            emptyIcon: Icons.local_laundry_service_outlined,
+                          ),
+                          _OrdersTab(
+                            db: _db,
+                            statuses: const ['delivered', 'completed'],
+                            label: 'completed',
+                            emptyIcon: Icons.check_circle_outline_rounded,
+                          ),
+                          _StaffTab(db: _db),
+                        ],
+                      ),
                     ),
-                    _OrdersTab(
-                      db: _db,
-                      statuses: const [
-                        'assigned',
-                        'accepted',
-                        'pickup',
-                        'processing',
-                        'out_for_delivery',
-                        'reached',
-                        'picked'
-                      ],
-                      label: 'active',
-                      emptyIcon: Icons.local_laundry_service_outlined,
-                    ),
-                    _OrdersTab(
-                      db: _db,
-                      statuses: const ['delivered', 'completed'],
-                      label: 'completed',
-                      emptyIcon: Icons.check_circle_outline_rounded,
-                    ),
-                    _StaffTab(db: _db),
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
-    return PanelThemeScope(panelKey: 'manager', child: content);
   }
 
   // ── Header ───────────────────────────────────────────────────
-  Widget _buildHeader(String name) {
-    final lt = DynTheme.of(context);
+  Widget _buildHeader(BuildContext themedContext, String name) {
+    final lt = DynTheme.of(themedContext);
     return Container(
       decoration: BoxDecoration(
         gradient: DynTheme.headerGradient,
@@ -274,7 +279,7 @@ class _ManagerDashboardState extends State<ManagerDashboard>
       );
 
   // ── Stats Row ────────────────────────────────────────────────
-  Widget _buildStatsRow() {
+  Widget _buildStatsRow(BuildContext themedContext) {
     if (_loading) {
       return Container(
         color: DynTheme.navy,
@@ -295,21 +300,22 @@ class _ManagerDashboardState extends State<ManagerDashboard>
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
       child: Row(
         children: [
-          _statChip('Pending', '$_pendingOrders', DynTheme.amber,
+          _statChip(themedContext, 'Pending', '$_pendingOrders', DynTheme.amber,
               Icons.pending_actions_rounded),
-          _statChip('Active', '$_activeOrders', DynTheme.blueSoft,
+          _statChip(themedContext, 'Active', '$_activeOrders', DynTheme.blueSoft,
               Icons.local_shipping_rounded),
-          _statChip('Done Today', '$_completedToday', DynTheme.emerald,
+          _statChip(themedContext, 'Done Today', '$_completedToday', DynTheme.emerald,
               Icons.check_circle_rounded),
           _statChip(
+              themedContext,
               'Online', '$_staffOnline', DynTheme.gold, Icons.person_rounded),
         ],
       ),
     );
   }
 
-  Widget _statChip(String label, String val, Color color, IconData icon) {
-    final lt = DynTheme.of(context);
+  Widget _statChip(BuildContext themedContext, String label, String val, Color color, IconData icon) {
+    final lt = DynTheme.of(themedContext);
     return Expanded(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -339,8 +345,8 @@ class _ManagerDashboardState extends State<ManagerDashboard>
   }
 
   // ── Tab Bar ──────────────────────────────────────────────────
-  Widget _buildTabBar() {
-    final lt = DynTheme.of(context);
+  Widget _buildTabBar(BuildContext themedContext) {
+    final lt = DynTheme.of(themedContext);
     return Container(
       color: lt.bg,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
@@ -470,10 +476,9 @@ class _StaffTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: db
-          .collection('users')
-          .where('role', whereIn: ['delivery', 'staff', 'manager']).snapshots(),
+    // Stream all 3 employee collections and merge them
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _CombinedEmployeeStream(db).stream,
       builder: (ctx, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -481,7 +486,8 @@ class _StaffTab extends StatelessWidget {
                 CircularProgressIndicator(color: DynTheme.gold, strokeWidth: 2),
           );
         }
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
+        final allEmployees = snap.data ?? [];
+        if (allEmployees.isEmpty) {
           return const LEmptyState(
             title: 'No staff found',
             sub: 'Add employees from the admin panel',
@@ -491,10 +497,10 @@ class _StaffTab extends StatelessWidget {
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           physics: const BouncingScrollPhysics(),
-          itemCount: snap.data!.docs.length,
+          itemCount: allEmployees.length,
           itemBuilder: (_, i) {
             final lt = DynTheme.of(context);
-            final d = snap.data!.docs[i].data() as Map<String, dynamic>;
+            final d = allEmployees[i];
             final role = d['role'] ?? 'staff';
             final online = d['isOnline'] ?? d['isActive'] ?? false;
             final color = role == 'delivery' ? DynTheme.gold : DynTheme.violet;
@@ -553,7 +559,7 @@ class _StaffTab extends StatelessWidget {
                         const SizedBox(height: 8),
                         GestureDetector(
                           onTap: () => _showAssignTaskSheet(
-                              context, snap.data!.docs[i].id, d),
+                              context, allEmployees[i]['id'] as String? ?? '', d),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 6),
@@ -690,9 +696,20 @@ class _StaffTab extends StatelessWidget {
                                 'status': 'assigned',
                                 'createdAt': FieldValue.serverTimestamp(),
                               });
-                              await db.collection('users').doc(staffId).update({
+                              await db.collection('staff').doc(staffId).update({
                                 'activeOrders': FieldValue.increment(1),
                                 'updatedAt': FieldValue.serverTimestamp(),
+                              });
+                              // Notify the staff member
+                              final taskBody = 'Manager assigned you a new task: "${taskCtrl.text.trim()}"';
+                              await db.collection('notifications').add({
+                                'userId': staffId,
+                                'title': '📋 New Task Assigned',
+                                'message': taskBody,
+                                'body': taskBody,
+                                'type': 'task_assigned',
+                                'isRead': false,
+                                'createdAt': FieldValue.serverTimestamp(),
                               });
                               if (ctx2.mounted) Navigator.pop(ctx2);
                               if (context.mounted) {
@@ -773,8 +790,8 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
   Future<void> _assignDelivery() async {
     // Load delivery agents
     final snap = await widget.db
-        .collection('users')
-        .where('role', isEqualTo: 'delivery')
+        .collection('delivery_agents')
+        .where('isActive', isEqualTo: true)
         .get();
     if (!mounted) return;
 
@@ -798,10 +815,16 @@ class _MgrOrderCardState extends State<_MgrOrderCard> {
             await widget.db.collection('orders').doc(widget.orderId).update({
               'status': 'assigned',
               'assignedTo': agent['id'],
+              'driverId': agent['id'],        // delivery_dashboard queries by driverId
               'driverName': agent['name'] ?? 'Driver',
               'driverPhone': agent['phone'] ?? '',
               'assignedAt': FieldValue.serverTimestamp(),
               'updatedAt': FieldValue.serverTimestamp(),
+              'statusHistory': FieldValue.arrayUnion([{
+                'status': 'assigned',
+                'note': 'Assigned by manager to ${agent['name'] ?? 'Driver'}',
+                'timestamp': DateTime.now().toIso8601String(),
+              }]),
             });
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1140,5 +1163,54 @@ class _AssignSheet extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ── Helper: combines delivery_agents + managers + staff into a single stream ─
+class _CombinedEmployeeStream {
+  final FirebaseFirestore _db;
+  _CombinedEmployeeStream(this._db);
+
+  Stream<List<Map<String, dynamic>>> get stream {
+    final s1 = _db.collection('delivery_agents').snapshots();
+    final s2 = _db.collection('managers').snapshots();
+    final s3 = _db.collection('staff').snapshots();
+    return _Merge3Stream(s1, s2, s3);
+  }
+}
+
+class _Merge3Stream extends Stream<List<Map<String, dynamic>>> {
+  final Stream<QuerySnapshot> s1, s2, s3;
+  _Merge3Stream(this.s1, this.s2, this.s3);
+
+  @override
+  StreamSubscription<List<Map<String, dynamic>>> listen(
+    void Function(List<Map<String, dynamic>>)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    QuerySnapshot? last1, last2, last3;
+
+    void emit(StreamController<List<Map<String, dynamic>>>? ctrl) {
+      if (last1 == null || last2 == null || last3 == null) return;
+      final list = <Map<String, dynamic>>[];
+      for (final snap in [last1!, last2!, last3!]) {
+        for (final doc in snap.docs) {
+          list.add({'id': doc.id, ...(doc.data() as Map<String, dynamic>)});
+        }
+      }
+      list.sort((a, b) =>
+          (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? ''));
+      ctrl?.add(list);
+    }
+
+    final ctrl = StreamController<List<Map<String, dynamic>>>();
+    s1.listen((q) { last1 = q; emit(ctrl); });
+    s2.listen((q) { last2 = q; emit(ctrl); });
+    s3.listen((q) { last3 = q; emit(ctrl); });
+
+    return ctrl.stream.listen(onData,
+        onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 }

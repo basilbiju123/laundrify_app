@@ -17,6 +17,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -39,11 +40,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                   margin: const EdgeInsets.only(right: 10),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                   decoration: BoxDecoration(
-                    color: active ? c.withValues(alpha: 0.2) : AdminTheme.card,
+                    color: active ? c.withValues(alpha: 0.2) : at.card,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: active ? c : AdminTheme.cardBorder, width: active ? 1.5 : 1),
+                    border: Border.all(color: active ? c : at.cardBorder, width: active ? 1.5 : 1),
                   ),
-                  child: Text(f.toUpperCase(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: active ? c : AdminTheme.textSecondary)),
+                  child: Text(f.toUpperCase(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: active ? c : at.textSecondary)),
                 ),
               );
             }).toList(),
@@ -59,7 +60,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                 : _db.collection('orders').where('paymentStatus', isEqualTo: _filter).orderBy('createdAt', descending: true).snapshots(),
             builder: (ctx, snap) {
               if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: AdminTheme.gold, strokeWidth: 2));
-              if (!snap.hasData || snap.data!.docs.isEmpty) return Center(child: Text('No transactions found', style: AdminTheme.label(14)));
+              if (!snap.hasData || snap.data!.docs.isEmpty) return Center(child: Text('No transactions found', style: at.label(14)));
 
               final docs = snap.data!.docs;
               double total = 0;
@@ -73,15 +74,15 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
                     child: Container(
                       padding: const EdgeInsets.all(20),
-                      decoration: AdminTheme.cardDecoration(glow: true),
+                      decoration: at.cardDecoration(glow: true),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          _sumCol('Transactions', '${docs.length}', AdminTheme.gold),
-                          Container(width: 1, height: 40, color: AdminTheme.cardBorder),
-                          _sumCol('Total Amount', '₹${_fmt(total)}', AdminTheme.emerald),
-                          Container(width: 1, height: 40, color: AdminTheme.cardBorder),
-                          _sumCol('Avg Value', '₹${docs.isEmpty ? 0 : _fmt(total / docs.length)}', AdminTheme.violet),
+                          _sumCol(context, 'Transactions', '${docs.length}', AdminTheme.gold),
+                          Container(width: 1, height: 40, color: at.cardBorder),
+                          _sumCol(context, 'Total Amount', '₹${_fmt(total)}', AdminTheme.emerald),
+                          Container(width: 1, height: 40, color: at.cardBorder),
+                          _sumCol(context, 'Avg Value', '₹${docs.isEmpty ? 0 : _fmt(total / docs.length)}', AdminTheme.violet),
                         ],
                       ),
                     ),
@@ -102,7 +103,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(16),
-                          decoration: AdminTheme.cardDecoration(),
+                          decoration: at.cardDecoration(),
                           child: Row(
                             children: [
                               Container(
@@ -115,16 +116,16 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(d['customerName'] ?? 'Customer', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AdminTheme.textPrimary)),
+                                    Text(d['customerName'] ?? 'Customer', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: at.textPrimary)),
                                     const SizedBox(height: 4),
                                     Row(children: [
-                                      Text('#${docs[i].id.substring(0, 8).toUpperCase()}', style: AdminTheme.label(11)),
+                                      Text('#${docs[i].id.substring(0, 8).toUpperCase()}', style: at.label(11)),
                                       const SizedBox(width: 8),
-                                      if (ts != null) Text('${ts.day}/${ts.month}/${ts.year}', style: AdminTheme.label(11).copyWith(color: AdminTheme.textMuted)),
+                                      if (ts != null) Text('${ts.day}/${ts.month}/${ts.year}', style: at.label(11).copyWith(color: at.textMuted)),
                                     ]),
                                     if (d['razorpayOrderId'] != null) ...[
                                       const SizedBox(height: 2),
-                                      Text('Razorpay: ${d['razorpayOrderId']}', style: AdminTheme.label(10).copyWith(color: AdminTheme.textMuted)),
+                                      Text('Razorpay: ${d['razorpayOrderId']}', style: at.label(10).copyWith(color: at.textMuted)),
                                     ],
                                   ],
                                 ),
@@ -132,7 +133,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Text('₹${amt.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AdminTheme.textPrimary)),
+                                  Text('₹${amt.toStringAsFixed(2)}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: at.textPrimary)),
                                   const SizedBox(height: 4),
                                   AdminBadge(label: pStatus, color: pColor, fontSize: 10),
                                 ],
@@ -152,11 +153,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
     );
   }
 
-  Widget _sumCol(String label, String value, Color color) => Column(children: [
-    Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: color)),
-    const SizedBox(height: 4),
-    Text(label, style: AdminTheme.label(11)),
-  ]);
+  Widget _sumCol(BuildContext context, String label, String value, Color color) {
+    final at = DynAdmin.of(context);
+    return Column(children: [
+      Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: color)),
+      const SizedBox(height: 4),
+      Text(label, style: at.label(11)),
+    ]);
+  }
 
   String _fmt(double v) {
     if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';

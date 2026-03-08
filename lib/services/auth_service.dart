@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
-import 'role_based_auth_service.dart';
-import 'employee_service.dart';
+import 'role_based_auth_service.dart'
+    show RoleBasedAuthService, isHardcodedAdmin, kAdminAllRoutes;
 import 'notification_service.dart';
 
 class AuthService {
@@ -15,7 +15,6 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final RoleBasedAuthService _roleService = RoleBasedAuthService();
-  final EmployeeService _employeeService = EmployeeService();
 
   // Lazy-init: never instantiated on Web (would crash with missing clientId)
   GoogleSignIn? _googleSignInInstance;
@@ -107,9 +106,94 @@ class AuthService {
   Future<Map<String, dynamic>> _buildGoogleSuccessResult(User user) async {
     final existingDoc = await _db.collection('users').doc(user.uid).get();
     final isNewUser = !existingDoc.exists;
+    final email = user.email ?? '';
+
+    // ── Super-admin hardcoded emails — always get all 5 dashboards ──────────
+    if (isHardcodedAdmin(email)) {
+      // Ensure the user doc exists in Firestore with role='admin'
+      await _db.collection('users').doc(user.uid).set({
+        'uid': user.uid,
+        'name': user.displayName ?? '',
+        'email': email,
+        'photoURL': user.photoURL,
+        'role': 'admin',
+        'isBlocked': false,
+        'isActive': true,
+        'authMethod': 'google',
+        'emailVerified': user.emailVerified,
+        'lastSignIn': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      return {
+        'success': true,
+        'user': user,
+        'route': '/admin-dashboard',
+        'isNewUser': isNewUser,
+        'accessibleRoles': List<String>.from(kAdminAllRoutes),
+        'hasMultipleRoles': true, // always show dashboard picker
+      };
+    }
+
+    // ── Is this an employee signing in? ────────────────────────────────
+    // Employees are pre-registered in managers/delivery_agents/staff.
+    // If their email matches, route them directly — NEVER write to /users.
+    // /users is exclusively for customers (role='user').
+    String? employeeRole;
+    if (email.isNotEmpty) {
+      const roleMap = {
+        'manager': 'managers',
+        'delivery': 'delivery_agents',
+        'staff': 'staff',
+      };
+      for (final entry in roleMap.entries) {
+        try {
+          final q = await _db
+              .collection(entry.value)
+              .where('email', isEqualTo: email)
+              .limit(1)
+              .get();
+          if (q.docs.isNotEmpty) {
+            employeeRole = entry.key;
+            final roleDoc = q.docs.first;
+            if (roleDoc.id != user.uid) {
+              // Migrate placeholder → real uid
+              final data = Map<String, dynamic>.from(roleDoc.data());
+              await _db.collection(entry.value).doc(user.uid).set({
+                ...data,
+                'uid': user.uid,
+                'photoURL': user.photoURL ?? '',
+                'emailVerified': user.emailVerified,
+                'lastSignIn': FieldValue.serverTimestamp(),
+                'syncedAt': FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
+              await roleDoc.reference.delete();
+            } else {
+              await _db.collection(entry.value).doc(user.uid).update({
+                'lastSignIn': FieldValue.serverTimestamp(),
+                'photoURL': user.photoURL ?? '',
+              });
+            }
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (employeeRole != null) {
+      // Employee → route to correct dashboard, skip /users entirely
+      final route = _routeForRole(employeeRole);
+      return {
+        'success': true,
+        'user': user,
+        'route': route,
+        'isNewUser': isNewUser,
+        'accessibleRoles': [route],
+        'hasMultipleRoles': false,
+      };
+    }
+
+    // ── Customer path ─────────────────────────────────────────────────
+    // Only customers land in /users with role='user'
     await _createOrUpdateGoogleUser(user);
-    // Link /employees record (if any) so role redirect works on first login
-    await _employeeService.linkEmployeeOnLogin(user);
     final accessibleRoles = await _roleService.getUserAccessibleRoles();
     final route = await _roleService.getDashboardRoute();
     return {
@@ -122,6 +206,16 @@ class AuthService {
     };
   }
 
+  String _routeForRole(String role) {
+    switch (role) {
+      case 'admin':    return '/admin-dashboard';
+      case 'manager':  return '/manager-dashboard';
+      case 'delivery': return '/delivery-dashboard';
+      case 'staff':    return '/employee-dashboard';
+      default:         return '/dashboard';
+    }
+  }
+
   String _mapDesktopGoogleError(FirebaseAuthException e) {
     if (e.code == 'popup-closed-by-user' || e.code == 'cancelled-popup-request') return 'Sign in cancelled';
     if (e.code == 'operation-not-allowed') return 'Google sign-in is disabled in Firebase Console.';
@@ -130,6 +224,8 @@ class AuthService {
     return e.message ?? 'Google sign-in failed';
   }
 
+  // Called ONLY for customers (employees are handled before this is reached).
+  // This always writes role='user' — employees never reach this method.
   Future<void> _createOrUpdateGoogleUser(User user) async {
     try {
       final doc = await _db.collection('users').doc(user.uid).get();
@@ -142,15 +238,35 @@ class AuthService {
           'phoneVerified': false,
           'emailVerified': user.emailVerified,
           'photoUrl': user.photoURL ?? '',
+          'photoURL': user.photoURL ?? '',
           'createdAt': FieldValue.serverTimestamp(),
           'authMethod': 'google',
-          'role': 'user',
+          'role': 'user',         // /users = customers only, always
+          'isBlocked': false,
+          'isActive': true,
+          'loyaltyPoints': 0,
+          'totalOrders': 0,
+          'totalSpent': 0.0,
         });
+        // Welcome notification
+        try {
+          await _db.collection('notifications').add({
+            'userId': user.uid,
+            'title': '👋 Welcome to Laundrify!',
+            'body': 'Fresh, clean laundry is just a tap away. Explore our services and place your first order today!',
+            'type': 'welcome',
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
       } else {
+        // Existing customer — update display fields only, never change role
         await _db.collection('users').doc(user.uid).update({
           'name': user.displayName ?? doc.data()?['name'] ?? '',
           'photoUrl': user.photoURL ?? doc.data()?['photoUrl'] ?? '',
+          'photoURL': user.photoURL ?? doc.data()?['photoURL'] ?? '',
           'emailVerified': user.emailVerified,
+          'lastSignIn': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
       }
@@ -172,6 +288,17 @@ class AuthService {
           'createdAt': FieldValue.serverTimestamp(), 'authMethod': 'email',
           'role': 'user',
         });
+        // Send welcome notification
+        try {
+          await _db.collection('notifications').add({
+            'userId': user.uid,
+            'title': '👋 Welcome to Laundrify!',
+            'body': 'Fresh, clean laundry is just a tap away. Explore our services and place your first order today!',
+            'type': 'welcome',
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
       }
       return user;
     } catch (e) { rethrow; }
@@ -234,7 +361,7 @@ class AuthService {
   Future<void> signOut() async {
     try {
       final notifService = NotificationService();
-      await notifService.unsubscribeAllTopics();
+      // unsubscribeAllTopics removed - token cleanup handled by deleteToken()
       await notifService.deleteToken();
     } catch (_) {}
     await _auth.signOut();

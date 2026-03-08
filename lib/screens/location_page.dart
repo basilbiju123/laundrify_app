@@ -24,6 +24,7 @@ class _LocationPageState extends State<LocationPage>
   String? currentAddress;
   double? currentLat;
   double? currentLng;
+  bool _isManualEntry = false;
   bool hasRequestedNotifications = false;
 
   final TextEditingController houseNumberController = TextEditingController();
@@ -381,8 +382,12 @@ class _LocationPageState extends State<LocationPage>
     final full = [street, city, if (pincode.isNotEmpty) pincode].join(', ');
     setState(() {
       currentAddress = full;
-      currentLat = 0.0; // placeholder for manual entry
+      // Manual entry has no GPS coordinates — store 0.0 as sentinel.
+      // _saveUserDataWithLocation checks manualEntry flag so delivery
+      // dashboard shows address text instead of trying to pin a map.
+      currentLat = 0.0;
       currentLng = 0.0;
+      _isManualEntry = true;
     });
     _snack("Address confirmed!", isError: false);
   }
@@ -435,7 +440,7 @@ class _LocationPageState extends State<LocationPage>
           "houseNumber": houseNumberController.text.trim(),
           "detailedAddress": detailedAddressController.text.trim(),
           "addressType": _selectedAddressType,
-          "isManualEntry": _isDesktop,
+          "isManualEntry": _isDesktop || _isManualEntry,
           "updatedAt": FieldValue.serverTimestamp(),
         },
       }, SetOptions(merge: true));

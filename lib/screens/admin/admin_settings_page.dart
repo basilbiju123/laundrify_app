@@ -16,6 +16,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
   final _db = FirebaseFirestore.instance;
   final _commCtrl        = TextEditingController(text: '10');
   final _minOrderCtrl    = TextEditingController(text: '99');
+  final _oneSignalKeyCtrl      = TextEditingController();
   final _phoneCtrl       = TextEditingController(text: '+919876543210');
   final _emailCtrl       = TextEditingController(text: 'support@laundrify.com');
   final _hoursCtrl       = TextEditingController(text: '8 AM – 10 PM daily');
@@ -31,6 +32,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
   @override
   void dispose() {
     _commCtrl.dispose(); _minOrderCtrl.dispose();
+    _oneSignalKeyCtrl.dispose();
     _phoneCtrl.dispose(); _emailCtrl.dispose(); _hoursCtrl.dispose();
     _facebookCtrl.dispose(); _instagramCtrl.dispose(); _youtubeCtrl.dispose();
     super.dispose();
@@ -84,6 +86,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final at = DynAdmin.of(context);
     // Get the admin panel's isolated theme service
     PanelThemeService? panelTheme;
     try { panelTheme = PanelThemeScope.of(context); } catch (_) {}
@@ -103,7 +106,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
           // ── APPEARANCE ────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: AdminTheme.cardDecoration(),
+            decoration: at.cardDecoration(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -116,12 +119,12 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
                   decoration: BoxDecoration(
                     color: isDark
                         ? const Color(0xFF1A2540)
-                        : AdminTheme.bg,
+                        : at.bg,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                         color: isDark
                             ? const Color(0xFF2D3A52)
-                            : AdminTheme.cardBorder),
+                            : at.cardBorder),
                   ),
                   child: Row(
                     children: [
@@ -148,9 +151,9 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
                                   fontWeight: FontWeight.w800,
                                   color: isDark
                                       ? Colors.white
-                                      : AdminTheme.textPrimary)),
+                                      : at.textPrimary)),
                           Text('Toggle dark theme for Admin panel only',
-                              style: AdminTheme.label(12)),
+                              style: at.label(12)),
                         ]),
                       ),
                       Switch(
@@ -177,17 +180,17 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
           // ── APP CONFIGURATION ─────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: AdminTheme.cardDecoration(),
+            decoration: at.cardDecoration(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _sectionHeader(Icons.settings_rounded, 'App Configuration'),
                 const SizedBox(height: 20),
-                _buildSettingField(_commCtrl, 'Commission Rate (%)',
+                _buildSettingField(context, _commCtrl, 'Commission Rate (%)',
                     Icons.percent_rounded,
                     keyboard: TextInputType.number),
                 const SizedBox(height: 14),
-                _buildSettingField(_minOrderCtrl,
+                _buildSettingField(context, _minOrderCtrl,
                     'Minimum Order Amount (₹)', Icons.currency_rupee_rounded,
                     keyboard: TextInputType.number),
                 const SizedBox(height: 20),
@@ -198,12 +201,12 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
                   decoration: BoxDecoration(
                     color: _maintenanceMode
                         ? AdminTheme.rose.withValues(alpha: 0.1)
-                        : AdminTheme.card,
+                        : at.card,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                         color: _maintenanceMode
                             ? AdminTheme.rose.withValues(alpha: 0.3)
-                            : AdminTheme.cardBorder),
+                            : at.cardBorder),
                   ),
                   child: Row(
                     children: [
@@ -219,13 +222,13 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                            const Text('Maintenance Mode',
+                            Text('Maintenance Mode',
                                 style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w800,
-                                    color: AdminTheme.textPrimary)),
+                                    color: at.textPrimary)),
                             Text('Disable app for all users temporarily',
-                                style: AdminTheme.label(12)),
+                                style: at.label(12)),
                           ])),
                       Switch(
                           value: _maintenanceMode,
@@ -271,35 +274,35 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
           // ── CONTACT INFO ──────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: AdminTheme.cardDecoration(),
+            decoration: at.cardDecoration(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _sectionHeader(
                     Icons.contact_phone_rounded, 'Contact & Social Links'),
-                const Text(
+                Text(
                     'These appear on the Help page visible to all users.',
                     style: TextStyle(
-                        fontSize: 11, color: AdminTheme.textMuted)),
+                        fontSize: 11, color: at.textMuted)),
                 const SizedBox(height: 16),
-                _buildSettingField(
+                _buildSettingField(context, 
                     _phoneCtrl, 'Support Phone', Icons.phone_rounded,
                     keyboard: TextInputType.phone),
                 const SizedBox(height: 12),
-                _buildSettingField(
+                _buildSettingField(context, 
                     _emailCtrl, 'Support Email', Icons.email_rounded,
                     keyboard: TextInputType.emailAddress),
                 const SizedBox(height: 12),
-                _buildSettingField(
+                _buildSettingField(context, 
                     _hoursCtrl, 'Working Hours', Icons.access_time_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(
+                _buildSettingField(context, 
                     _facebookCtrl, 'Facebook URL', Icons.facebook_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(_instagramCtrl, 'Instagram URL',
+                _buildSettingField(context, _instagramCtrl, 'Instagram URL',
                     Icons.camera_alt_rounded),
                 const SizedBox(height: 12),
-                _buildSettingField(_youtubeCtrl, 'YouTube URL',
+                _buildSettingField(context, _youtubeCtrl, 'YouTube URL',
                     Icons.play_circle_fill_rounded),
                 const SizedBox(height: 20),
                 SizedBox(
@@ -334,7 +337,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
           // ── ABOUT ─────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: AdminTheme.cardDecoration(),
+            decoration: at.cardDecoration(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -353,7 +356,9 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
     );
   }
 
-  Widget _sectionHeader(IconData icon, String title) => Row(children: [
+  Widget _sectionHeader(IconData icon, String title) {
+    final at = DynAdmin.of(context);
+    return Row(children: [
         Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -361,31 +366,33 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
                 borderRadius: BorderRadius.circular(10)),
             child: Icon(icon, color: AdminTheme.gold, size: 18)),
         const SizedBox(width: 12),
-        Text(title, style: AdminTheme.heading(15)),
+        Text(title, style: at.heading(15)),
       ]);
+  }
 
   Widget _buildSettingField(
-      TextEditingController ctrl, String label, IconData icon,
+      BuildContext ctx, TextEditingController ctrl, String label, IconData icon,
       {TextInputType? keyboard}) {
+    final at = DynAdmin.of(ctx);
     return TextField(
       controller: ctrl,
       keyboardType: keyboard,
-      style: const TextStyle(color: AdminTheme.textPrimary, fontSize: 14),
+      style: TextStyle(color: at.textPrimary, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: AdminTheme.label(13),
+        labelStyle: at.label(13),
         prefixIcon:
-            Icon(icon, color: AdminTheme.textSecondary, size: 20),
+            Icon(icon, color: at.textSecondary, size: 20),
         filled: true,
-        fillColor: AdminTheme.bg,
+        fillColor: at.bg,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AdminTheme.cardBorder)),
+            borderSide: BorderSide(color: at.cardBorder)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AdminTheme.cardBorder)),
+            borderSide: BorderSide(color: at.cardBorder)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide:
@@ -394,18 +401,21 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
     );
   }
 
-  Widget _infoRow(String label, String value) => Padding(
+  Widget _infoRow(String label, String value) {
+    final at = DynAdmin.of(context);
+    return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(children: [
           SizedBox(
               width: 100,
-              child: Text(label, style: AdminTheme.label(13))),
+              child: Text(label, style: at.label(13))),
           Expanded(
               child: Text(value,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AdminTheme.textPrimary))),
+                      color: at.textPrimary))),
         ]),
       );
+  }
 }

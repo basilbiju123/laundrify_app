@@ -13,6 +13,7 @@ import 'admin_payments_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_settings_page.dart';
 import 'admin_analytics_page.dart';
+import 'admin_coupons_page.dart';
 import '../auth_options_page.dart';
 import '../../services/panel_theme_service.dart';
 
@@ -62,6 +63,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     _NavItem(Icons.people_rounded, 'Users'),
     _NavItem(Icons.badge_rounded, 'Employees'),
     _NavItem(Icons.payment_rounded, 'Payments'),
+    _NavItem(Icons.local_offer_rounded, 'Coupons'),
     _NavItem(Icons.analytics_rounded, 'Analytics'),
     _NavItem(Icons.notifications_rounded, 'Alerts'),
     _NavItem(Icons.settings_rounded, 'Settings'),
@@ -104,16 +106,22 @@ class _AdminDashboardState extends State<AdminDashboard>
       final todayStart = DateTime(now.year, now.month, now.day);
       final monthStart = DateTime(now.year, now.month, 1);
 
-      // Simple single-field queries to avoid composite index requirements
+      // Query users + all 3 role collections + orders
       final results = await Future.wait([
         _db.collection('users').get(),
         _db.collection('orders').get(),
+        _db.collection('delivery_agents').count().get(),
+        _db.collection('managers').count().get(),
+        _db.collection('staff').count().get(),
       ]);
 
       final usersSnap = results[0] as QuerySnapshot;
       final ordersSnap = results[1] as QuerySnapshot;
+      final deliveryCount = (results[2] as AggregateQuerySnapshot).count ?? 0;
+      final managerCount  = (results[3] as AggregateQuerySnapshot).count ?? 0;
+      final staffCount    = (results[4] as AggregateQuerySnapshot).count ?? 0;
 
-      int uCount = 0, empCount = 0, newUsersToday_ = 0;
+      int uCount = 0, newUsersToday_ = 0;
       for (var d in usersSnap.docs) {
         final m = d.data() as Map;
         final role = (m['role'] ?? 'user') as String;
@@ -122,8 +130,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           final ts = (m['createdAt'] as Timestamp?)?.toDate();
           if (ts != null && ts.isAfter(todayStart)) newUsersToday_++;
         }
-        if (['delivery', 'manager', 'staff', 'employee'].contains(role)) empCount++;
       }
+      final empCount = deliveryCount + managerCount + staffCount;
 
       int oTotal = 0, oActive = 0, oPending = 0, oComplete = 0, oCancel = 0, oToday = 0;
       double oRev = 0, oMonthRev = 0, oDayRev = 0;
@@ -257,64 +265,64 @@ class _AdminDashboardState extends State<AdminDashboard>
 
     @override
   Widget build(BuildContext context) {
-    final at = DynAdmin.of(context);
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
     final isWide = MediaQuery.of(context).size.width > 760;
-    final scaffold = Scaffold(
-      backgroundColor: at.bg,
-      drawer: isWide
-          ? null
-          : Drawer(
-              backgroundColor: at.surface,
-              child: _sidebar(),
-            ),
-      body: Row(children: [
-        if (isWide) _sidebar(),
-        Expanded(
-            child: Column(children: [
-          _topBar(isWide),
-          Expanded(
-            child: SafeArea(
-              top: false,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child:
-                    KeyedSubtree(key: ValueKey(_selectedIndex), child: _page()),
-              ),
-            ),
-          ),
-        ])),
-      ]),
+    // PanelThemeScope MUST wrap the scaffold so DynAdmin.of(context) inside
+    // children reads the correct (possibly dark) brightness from the panel theme.
+    return PanelThemeScope(
+      panelKey: 'admin',
+      child: Builder(
+        builder: (ctx) {
+          final at = DynAdmin.of(ctx);
+          return Scaffold(
+            backgroundColor: at.bg,
+            drawer: isWide
+                ? null
+                : Drawer(
+                    backgroundColor: at.surface,
+                    child: _sidebar(ctx),
+                  ),
+            body: Row(children: [
+              if (isWide) _sidebar(ctx),
+              Expanded(
+                  child: Column(children: [
+                _topBar(isWide),
+                Expanded(
+                  child: SafeArea(
+                    top: false,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      child: KeyedSubtree(
+                          key: ValueKey(_selectedIndex), child: _page()),
+                    ),
+                  ),
+                ),
+              ])),
+            ]),
+          );
+        },
+      ),
     );
-    return PanelThemeScope(panelKey: 'admin', child: scaffold);
   }
 
   Widget _page() {
     switch (_selectedIndex) {
-      case 0:
-        return _home();
-      case 1:
-        return const AdminOrdersPage();
-      case 2:
-        return const AdminUsersPage();
-      case 3:
-        return const AdminEmployeesPage();
-      case 4:
-        return const AdminPaymentsPage();
-      case 5:
-        return const AdminAnalyticsPage();
-      case 6:
-        return const AdminNotificationsPage();
-      case 7:
-        return const AdminSettingsPage();
-      default:
-        return _home();
+      case 0: return _home();
+      case 1: return const AdminOrdersPage();
+      case 2: return const AdminUsersPage();
+      case 3: return const AdminEmployeesPage();
+      case 4: return const AdminPaymentsPage();
+      case 5: return const AdminCouponsPage();
+      case 6: return const AdminAnalyticsPage();
+      case 7: return const AdminNotificationsPage();
+      case 8: return const AdminSettingsPage();
+      default: return _home();
     }
   }
 
   // ── Sidebar ───────────────────────────────────────────────────
-  Widget _sidebar() {
-    final at = DynAdmin.of(context);
+  Widget _sidebar(BuildContext themedCtx) {
+    final at = DynAdmin.of(themedCtx);
     final user = _auth.currentUser;
     return Container(
       width: 215,
@@ -366,7 +374,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                 onTap: () {
                   setState(() => _selectedIndex = i);
                   _entryCtrl.forward(from: 0);
-                  if (Navigator.canPop(context)) Navigator.pop(context);
+                  // Close drawer on mobile
+                  final scaffold = Scaffold.maybeOf(themedCtx);
+                  if (scaffold != null && scaffold.isDrawerOpen) {
+                    Navigator.of(themedCtx).pop();
+                  }
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
@@ -449,17 +461,16 @@ class _AdminDashboardState extends State<AdminDashboard>
                           fontSize: 9, color: at.textSecondary)),
                 ])),
             GestureDetector(
-              onTap: () async {
+              onTap: () {
                 final uid = _auth.currentUser?.uid ?? '';
-                await _auth.signOut();
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.remove('last_dashboard_$uid');
-                if (mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
-                    (r) => false,
-                  );
-                }
+                Navigator.of(themedCtx).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                  (r) => false,
+                );
+                _auth.signOut().then((_) async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.remove('last_dashboard_$uid');
+                });
               },
               child: const Icon(Icons.logout_rounded,
                   color: AdminTheme.rose, size: 16),
@@ -473,6 +484,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   // ── Top Bar ───────────────────────────────────────────────────
   Widget _topBar(bool isWide) {
+    final at = DynAdmin.of(context);
     final user = _auth.currentUser;
     final name = user?.displayName ?? 'Admin';
     final h = DateTime.now().hour;
@@ -541,6 +553,30 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             const SizedBox(width: 8),
+            Builder(builder: (ctx) {
+              PanelThemeService? pt;
+              try {
+                pt = PanelThemeScope.of(ctx);
+              } catch (_) {}
+              if (pt == null) return const SizedBox.shrink();
+              return GestureDetector(
+                onTap: () => pt!.toggle(),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  child: Icon(
+                    at.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(width: 8),
             // Sign out
             GestureDetector(
               onTap: () async {
@@ -558,13 +594,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                   ],
                 ));
                 if (ok == true && mounted) {
-                  await _auth.signOut();
-                  if (mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
-                      (r) => false,
-                    );
-                  }
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const AuthOptionsPage()),
+                    (r) => false,
+                  );
+                  _auth.signOut();
                 }
               },
               child: Container(

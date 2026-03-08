@@ -51,3 +51,35 @@ Future<void> showMobileNotification(RemoteMessage message) async {
 }
 
 Future<void> clearMobileNotifications() => _localNotifications.cancelAll();
+
+/// Shows a local notification directly — no FCM/OneSignal needed.
+/// Call this anywhere in the app for instant demo-ready notifications.
+Future<void> showDirectNotification({
+  required String title,
+  required String body,
+  String? payload,
+  int id = 0,
+}) async {
+  final androidDetails = AndroidNotificationDetails(
+    'laundrify_notifications', 'Laundrify Notifications',
+    channelDescription: 'Order updates',
+    importance: Importance.max,
+    priority: Priority.max,
+    playSound: true,
+    enableVibration: true,
+    icon: '@mipmap/ic_launcher',
+    ticker: title,
+  );
+  const iosDetails = DarwinNotificationDetails(
+    presentAlert: true,
+    presentBadge: true,
+    presentSound: true,
+  );
+  await _localNotifications.show(
+    id,
+    title,
+    body,
+    NotificationDetails(android: androidDetails, iOS: iosDetails),
+    payload: payload,
+  );
+}

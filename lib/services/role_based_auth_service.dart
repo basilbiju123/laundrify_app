@@ -1,326 +1,652 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../models/firestore_models.dart';
+import 'package:http/http.dart' as http;
+import 'notification_service.dart';
+import 'employee_notification_service.dart';
+import 'dart:convert';
 
+// ─── Hardcoded super-admin emails ────────────────────────────────────────────
+// These two accounts ALWAYS have admin access to ALL 5 dashboards,
+// regardless of what is stored in Firestore.
+const Set<String> kSuperAdminEmails = {
+  'bsheena056@gmail.com',
+  'alenpoovan@gmail.com',
+};
+
+/// Returns true if [email] belongs to a hardcoded super-admin.
+bool isHardcodedAdmin(String? email) =>
+    email != null && kSuperAdminEmails.contains(email.toLowerCase().trim());
+
+/// Returns ALL 5 accessible dashboard routes for a super-admin.
+const List<String> kAdminAllRoutes = [
+  '/admin-dashboard',
+  '/manager-dashboard',
+  '/delivery-dashboard',
+  '/employee-dashboard',
+  '/dashboard',
+];
+
+
+/// Central service that:
+///   1. Reads the 'role' field from /users/{uid} after login
+///   2. Returns the correct dashboard route
+///   3. Writes to role-specific collections (managers / delivery_agents / staff)
+///      whenever admin assigns / changes a role
 class RoleBasedAuthService {
-  static final RoleBasedAuthService _instance = RoleBasedAuthService._internal();
-  factory RoleBasedAuthService() => _instance;
-  RoleBasedAuthService._internal();
-
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  static const Map<String, String> _roleCollections = {
+    'manager': 'managers',
+    'delivery': 'delivery_agents',
+    'staff': 'staff',
+  };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SUPER ADMINS
-  //
-  // Two super-admin accounts — both have IDENTICAL permissions and data
-  // visibility across all dashboards, collections, and features.
-  //
-  //   superAdminEmail  → PRIMARY owner  : bsheena056@gmail.com
-  //   superAdminEmail2 → SECONDARY owner: alenpoovan@gmail.com
-  //
-  // The only distinction is hard-delete / danger-zone operations
-  // (e.g. permanently deleting a user document), which are gated to
-  // the primary owner only. All other capabilities are equal.
-  // ─────────────────────────────────────────────────────────────────────────
-  static const String superAdminEmail  = 'bsheena056@gmail.com';   // Primary owner
-  static const String superAdminEmail2 = 'alenpoovan@gmail.com';   // Secondary owner
+  String _normEmail(String? email) => (email ?? '').toLowerCase().trim();
 
-  bool get isSuperAdmin {
-    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
-    return email == superAdminEmail.toLowerCase() ||
-           email == superAdminEmail2.toLowerCase();
+  Future<Map<String, dynamic>?> _findEmployeeByEmail(String email) async {
+    final normalized = _normEmail(email);
+    if (normalized.isEmpty) return null;
+    final uid = _auth.currentUser?.uid;
+    for (final entry in _roleCollections.entries) {
+      // Check by UID first (fast — O(1) doc lookup, covers post-first-login)
+      if (uid != null) {
+        final byUid = await _db.collection(entry.value).doc(uid).get();
+        if (byUid.exists) {
+          return {'role': entry.key, 'collection': entry.value, 'doc': byUid};
+        }
+      }
+      // Fall back to email query (covers pre-first-login pending docs)
+      final q = await _db
+          .collection(entry.value)
+          .where('email', isEqualTo: normalized)
+          .limit(1)
+          .get();
+      if (q.docs.isNotEmpty) {
+        return {
+          'role': entry.key,
+          'collection': entry.value,
+          'doc': q.docs.first,
+        };
+      }
+    }
+    return null;
   }
 
-  /// Returns true only for the PRIMARY owner (bsheena056@gmail.com).
-  /// Gate destructive operations (delete users, wipe stats, etc.) behind this.
-  bool get isPrimaryAdmin {
-    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
-    return email == superAdminEmail.toLowerCase();
-  }
+  // ─────────────────────────────────────────────────────────────
+  // 1.  ROUTE RESOLUTION  (called right after any sign-in)
+  // ─────────────────────────────────────────────────────────────
 
-  /// Returns true for the SECONDARY owner (alenpoovan@gmail.com).
-  bool get isSecondaryAdmin {
-    final email = _auth.currentUser?.email?.toLowerCase().trim() ?? '';
-    return email == superAdminEmail2.toLowerCase();
-  }
-
-  /// Can perform destructive / danger-zone operations?
-  /// Both super-admins return true here — restrict only if you specifically
-  /// want to limit the secondary admin, in which case return isPrimaryAdmin.
-  bool get canPerformDangerousActions => isSuperAdmin;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // GET USER ROLE
-  // Resolution order:
-  //   1. Hard-coded super-admin emails → always admin
-  //   2. /employees/{uid}  → role field (source of truth for employees)
-  //   3. /users/{uid}      → role field (fallback / legacy)
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<UserRole> getUserRole() async {
+  /// Returns the dashboard route string for the currently signed-in user.
+  /// Super-admin emails always return '/admin-dashboard'.
+  /// Otherwise: role stored in /users/{uid}  →  fallback '/dashboard'
+  Future<String> getDashboardRoute() async {
     final user = _auth.currentUser;
-    if (user == null) return UserRole.user;
+    if (user == null) return '/dashboard';
 
-    // Super-admin emails always get admin role immediately
-    if (isSuperAdmin) return UserRole.admin;
+    // Super-admin email bypass — always admin regardless of Firestore
+    if (isHardcodedAdmin(user.email)) return '/admin-dashboard';
 
     try {
-      // ── Step 1: Check /employees collection first ─────────────────────────
-      final empDoc = await _db.collection('employees').doc(user.uid).get();
-      if (empDoc.exists) {
-        final roleStr = (empDoc.data()?['role'] as String?) ?? '';
-        final role = _parseRole(roleStr);
-        // If a valid employee role is found, use it (skip /users lookup)
-        if (role != UserRole.user) return role;
+      final employee = await _findEmployeeByEmail(user.email ?? '');
+      if (employee != null) {
+        return _routeForRole(employee['role'] as String);
       }
 
-      // ── Step 2: Fallback to /users collection ────────────────────────────
-      final userDoc = await _db.collection('users').doc(user.uid).get();
-      if (!userDoc.exists) return UserRole.user;
-      final roleStr = (userDoc.data()?['role'] as String?) ?? 'user';
-      return _parseRole(roleStr);
+      final doc = await _db.collection('users').doc(user.uid).get();
+      if (!doc.exists) {
+        final byEmail = await _db
+            .collection('users')
+            .where('email', isEqualTo: _normEmail(user.email))
+            .limit(1)
+            .get();
+        if (byEmail.docs.isEmpty) return '/dashboard';
+        final role =
+            (byEmail.docs.first.data()['role'] as String? ?? 'user').toLowerCase();
+        return _routeForRole(role);
+      }
+
+      final role = (doc.data()?['role'] as String? ?? 'user').toLowerCase();
+      return _routeForRole(role);
     } catch (_) {
-      return UserRole.user;
+      return '/dashboard';
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // GET ACCESSIBLE ROLES (admin can switch between all dashboards)
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<List<UserRole>> getUserAccessibleRoles() async {
-    final role = await getUserRole();
-    if (role == UserRole.admin) {
-      return [UserRole.user, UserRole.admin, UserRole.manager, UserRole.delivery, UserRole.staff];
+  /// Same as [getDashboardRoute] but also returns every accessible route
+  /// (useful when a user has more than one role — rare but supported).
+  Future<List<String>> getUserAccessibleRoles() async {
+    final user = _auth.currentUser;
+    if (user == null) return ['/dashboard'];
+
+    // Super-admin email → all 5 dashboards
+    if (isHardcodedAdmin(user.email)) return List<String>.from(kAdminAllRoutes);
+
+    try {
+      final employee = await _findEmployeeByEmail(user.email ?? '');
+      if (employee != null) {
+        return [_routeForRole(employee['role'] as String)];
+      }
+
+      final doc = await _db.collection('users').doc(user.uid).get();
+      if (!doc.exists) {
+        final byEmail = await _db
+            .collection('users')
+            .where('email', isEqualTo: _normEmail(user.email))
+            .limit(1)
+            .get();
+        if (byEmail.docs.isEmpty) return ['/dashboard'];
+        final role =
+            (byEmail.docs.first.data()['role'] as String? ?? 'user').toLowerCase();
+        if (role == 'admin') return List<String>.from(kAdminAllRoutes);
+        return [_routeForRole(role)];
+      }
+
+      final role = (doc.data()?['role'] as String? ?? 'user').toLowerCase();
+      // Firestore admins also get all dashboards
+      if (role == 'admin') return List<String>.from(kAdminAllRoutes);
+      // Single role — wrap in list
+      return [_routeForRole(role)];
+    } catch (_) {
+      return ['/dashboard'];
     }
-    return [role];
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // GET DASHBOARD ROUTE BASED ON ROLE
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<String> getDashboardRoute() async {
-    final role = await getUserRole();
+  String _routeForRole(String role) {
     switch (role) {
-      case UserRole.admin:
+      case 'admin':
         return '/admin-dashboard';
-      case UserRole.manager:
+      case 'manager':
         return '/manager-dashboard';
-      case UserRole.delivery:
+      case 'delivery':
         return '/delivery-dashboard';
-      case UserRole.staff:
+      case 'staff':
         return '/employee-dashboard';
       default:
         return '/dashboard';
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SHOW ROLE SELECTION DIALOG (for multi-role users like admin)
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<String?> showRoleSelectionDialog(BuildContext context) async {
-    final roles = await getUserAccessibleRoles();
-    if (!context.mounted) return null;
+  // ─────────────────────────────────────────────────────────────
+  // 2.  GOOGLE SIGN-IN  — ensure pre-assigned role is preserved
+  // ─────────────────────────────────────────────────────────────
 
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            color: Colors.white,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56, height: 56,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF080F1E),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.dashboard_rounded, color: Color(0xFFF5C518), size: 28),
-              ),
-              const SizedBox(height: 16),
-              const Text('Choose Dashboard',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0A1628))),
-              const SizedBox(height: 6),
-              const Text('Select how you want to continue',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
-              const SizedBox(height: 20),
-              ...roles.map((role) {
-                final route = _routeForRole(role);
-                final label = _labelForRole(role);
-                final icon = _iconForRole(role);
-                final color = _colorForRole(role);
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => Navigator.pop(ctx, route),
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.07),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: color.withValues(alpha: 0.25)),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40, height: 40,
-                              decoration: BoxDecoration(
-                                color: color.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(icon, color: color, size: 20),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(child: Text(label,
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: color))),
-                            Icon(Icons.arrow_forward_ios_rounded, color: color.withValues(alpha: 0.5), size: 14),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  /// Call this from AuthService after a successful Google sign-in.
+  ///
+  /// Logic:
+  ///   a) If /users/{uid} already exists → keep its role (admin may have
+  ///      pre-assigned one before first login).
+  ///   b) If it is a brand-new Google account → create with role='user'.
+  ///   c) If the account was pre-registered by admin using email (no uid yet)
+  ///      → merge the Google uid into that doc.
+  ///
+  /// Returns the dashboard route string.
+  Future<String> handleGoogleSignIn(User firebaseUser) async {
+    final uid = firebaseUser.uid;
+    final email = (firebaseUser.email ?? '').toLowerCase().trim();
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ROLE MANAGEMENT (legacy — still works via /users, but prefer EmployeeService)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Future<void> assignRole(String uid, String role) async {
-    await _db.collection('users').doc(uid).update({
-      'role': role,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  Future<void> removeRole(String uid) async {
-    await _db.collection('users').doc(uid).update({
-      'role': 'user',
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  Future<Map<String, dynamic>> addRoleByEmail(String email, String role) async {
-    try {
-      final snap = await _db
-          .collection('users')
-          .where('email', isEqualTo: email.trim().toLowerCase())
-          .limit(1)
-          .get();
-
-      if (snap.docs.isEmpty) {
-        return {'success': false, 'error': 'No user found with email: $email'};
+    // ── STEP 1: Check role-specific collections FIRST ──────────────
+    // Admin adds employees to delivery_agents/managers/staff BEFORE they sign in.
+    // We must check these BEFORE /users so employees are never routed to /dashboard.
+    for (final entry in {
+      'manager': 'managers',
+      'delivery': 'delivery_agents',
+      'staff': 'staff',
+    }.entries) {
+      // Check by UID first (already linked)
+      final byUid = await _db.collection(entry.value).doc(uid).get();
+      if (byUid.exists) {
+        await _db.collection(entry.value).doc(uid).set({
+          'uid': uid,
+          'email': email,
+          'photoURL': firebaseUser.photoURL,
+          'displayName': firebaseUser.displayName ?? '',
+          'emailVerified': firebaseUser.emailVerified,
+          'lastSignIn': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        return _routeForRole(entry.key);
       }
 
-      final doc = snap.docs.first;
-      await _db.collection('users').doc(doc.id).update({
-        'role': role,
+      // Check by email (admin pre-registered, no uid yet)
+      final byEmail = await _db
+          .collection(entry.value)
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+      if (byEmail.docs.isNotEmpty) {
+        final roleDoc = byEmail.docs.first;
+        final roleData = roleDoc.data();
+        // Migrate to uid-keyed doc
+        await _db.collection(entry.value).doc(uid).set({
+          ...roleData,
+          'uid': uid,
+          'email': email,
+          'photoURL': firebaseUser.photoURL,
+          'displayName': firebaseUser.displayName ?? roleData['name'] ?? '',
+          'emailVerified': firebaseUser.emailVerified,
+          'lastSignIn': FieldValue.serverTimestamp(),
+          'syncedAt': FieldValue.serverTimestamp(),
+          'isPending': false,
+        }, SetOptions(merge: true));
+        if (roleDoc.id != uid) await roleDoc.reference.delete();
+        return _routeForRole(entry.key);
+      }
+    }
+
+    // ── STEP 2: Check /users by uid ────────────────────────────────
+    final userDocRef = _db.collection('users').doc(uid);
+    final existingDoc = await userDocRef.get();
+
+    if (existingDoc.exists) {
+      final data = existingDoc.data()!;
+      final role = (data['role'] as String? ?? 'user').toLowerCase();
+      await userDocRef.update({
+        'email': email,
+        'photoURL': firebaseUser.photoURL,
+        'displayName': firebaseUser.displayName,
+        'lastSignIn': FieldValue.serverTimestamp(),
+        'authMethod': 'google',
+      });
+      // If this users doc has an employee role, sync to role collection
+      if (role != 'user' && role != 'admin') {
+        await _syncToRoleCollection(uid, role, data);
+      }
+      return _routeForRole(role);
+    }
+
+    // ── STEP 3: Check /users by email (admin pre-registered in /users) ──
+    final preRegistered = await _db
+        .collection('users')
+        .where('email', isEqualTo: email)
+        .where('createdByAdmin', isEqualTo: true)
+        .limit(1)
+        .get();
+
+    if (preRegistered.docs.isNotEmpty) {
+      final preDoc = preRegistered.docs.first;
+      final preData = preDoc.data();
+      final role = (preData['role'] as String? ?? 'user').toLowerCase();
+      final mergedData = {
+        ...preData,
+        'uid': uid,
+        'email': email,
+        'photoURL': firebaseUser.photoURL,
+        'displayName': firebaseUser.displayName ?? preData['name'] ?? '',
+        'authMethod': 'google',
+        'emailVerified': firebaseUser.emailVerified,
+        'lastSignIn': FieldValue.serverTimestamp(),
+      };
+      await userDocRef.set(mergedData);
+      if (preDoc.id != uid) await preDoc.reference.delete();
+      if (role != 'user' && role != 'admin') {
+        await _syncToRoleCollection(uid, role, mergedData);
+      }
+      return _routeForRole(role);
+    }
+
+    // ── STEP 4: Truly new customer — create /users doc with role='user' ──
+    await userDocRef.set({
+      'uid': uid,
+      'name': firebaseUser.displayName ?? '',
+      'email': email,
+      'phone': firebaseUser.phoneNumber ?? '',
+      'photoURL': firebaseUser.photoURL,
+      'role': 'user',
+      'isBlocked': false,
+      'isActive': true,
+      'authMethod': 'google',
+      'emailVerified': firebaseUser.emailVerified,
+      'loyaltyPoints': 0,
+      'totalOrders': 0,
+      'totalSpent': 0.0,
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastSignIn': FieldValue.serverTimestamp(),
+    });
+
+    return '/dashboard';
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 3.  ROLE ASSIGNMENT  (admin operations)
+  // ─────────────────────────────────────────────────────────────
+
+  /// Assigns [newRole] to a user doc by [uid].
+  /// Also writes a mirrored document to the role-specific collection.
+  /// Sends an in-app notification to the employee about their role change.
+  Future<void> assignRole(String uid, String newRole) async {
+    Map<String, dynamic>? sourceData;
+    String? oldRole;
+    for (final entry in _roleCollections.entries) {
+      final doc = await _db.collection(entry.value).doc(uid).get();
+      if (doc.exists) {
+        sourceData = doc.data();
+        oldRole = entry.key;
+        break;
+      }
+    }
+    sourceData ??= (await _db.collection('users').doc(uid).get()).data();
+    if (sourceData == null) return;
+
+    await _removeFromAllRoleCollections(uid);
+    if (newRole != 'user' && newRole != 'admin') {
+      await _syncToRoleCollection(uid, newRole, {
+        ...sourceData,
+        'role': newRole,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+    }
+
+    // ── Notify the employee about their role change ──
+    try {
+      final roleLabel = _labelForRole(newRole);
+      final oldLabel = oldRole != null ? _labelForRole(oldRole) : 'previous role';
+      final name = sourceData['name'] as String? ?? 'Employee';
+
+      // In-app Firestore notification
+      await _db.collection('notifications').add({
+        'userId': uid,
+        'title': '🔄 Your Role Has Been Updated',
+        'message': 'Hi \$name, your role has been changed from \$oldLabel to \$roleLabel. Please sign out and sign back in to access your updated dashboard.',
+        'body': 'Hi \$name, your role has been changed from \$oldLabel to \$roleLabel.',
+        'type': 'role_change',
+        'role': newRole,
+        'isRead': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Fire local notification immediately (visible even without FCM/OneSignal)
+      NotificationService().showRoleNotification(name: name, newRole: roleLabel);
+
+      // Send role change email
+      final empEmail = sourceData['email'] as String? ?? '';
+      if (empEmail.isNotEmpty) {
+        EmployeeNotificationService().sendRoleChangedEmail(
+          name: name,
+          email: empEmail,
+          newRole: newRole,
+        );
+      }
+
+      // Push notification via OneSignal (best-effort, may not work in demo)
+      await _sendRoleChangePush(uid: uid, name: name, newRole: roleLabel, oldRole: oldLabel);
+    } catch (e) {
+      debugPrint('assignRole notification error (non-fatal): \$e');
+    }
+  }
+
+  Future<void> _sendRoleChangePush({
+    required String uid,
+    required String name,
+    required String newRole,
+    required String oldRole,
+  }) async {
+    const appId = '92ab5f14-7803-43d2-b8b8-47a11527a89a';
+    const oneSignalRestKey = 'os_v2_app_skvv6fdyanb5fofyi6qrkj5itj3cx66rowaudiuhmf24jrvmzebfezsaqbc4qcikgnsh5yhy3fib5jbir35u3z45yynr4y6nq4akglq';
+    try {
+      // Get player ID from role collections or users
+      String? playerId;
+      for (final col in ['delivery_agents', 'managers', 'staff', 'users']) {
+        final doc = await _db.collection(col).doc(uid).get();
+        if (doc.exists) {
+          playerId = doc.data()?['oneSignalPlayerId'] as String?;
+          if (playerId != null && playerId.isNotEmpty) break;
+        }
+      }
+      if (playerId == null || playerId.isEmpty) return;
+      await http.post(
+        Uri.parse('https://onesignal.com/api/v1/notifications'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Basic $oneSignalRestKey'},
+        body: jsonEncode({
+          'app_id': appId,
+          'include_player_ids': [playerId],
+          'headings': {'en': '🔄 Role Updated'},
+          'contents': {'en': 'Hi \$name, you are now a \$newRole. Sign out and back in to access your new dashboard.'},
+          'data': {'type': 'role_change'},
+        }),
+      );
+    } catch (e) {
+      debugPrint('_sendRoleChangePush error (non-fatal): \$e');
+    }
+  }
+
+  String _labelForRole(String role) {
+    switch (role.toLowerCase()) {
+      case 'delivery': return 'Delivery Agent';
+      case 'manager': return 'Manager';
+      case 'staff': return 'Staff Member';
+      case 'admin': return 'Administrator';
+      default: return role[0].toUpperCase() + role.substring(1);
+    }
+  }
+
+  /// Assigns role by looking up a user's email.
+  /// Returns {success: bool, name: String, phone: String, employeeId: String, error: String?}
+  Future<Map<String, dynamic>> addRoleByEmail(
+      String email, String role) async {
+    try {
+      final normalized = _normEmail(email);
+      if (normalized.isEmpty) {
+        return {'success': false, 'error': 'Email is required'};
+      }
+      if (!_roleCollections.containsKey(role)) {
+        return {'success': false, 'error': 'Invalid role'};
+      }
+
+      Map<String, dynamic> baseData = {};
+      String? existingUid;
+
+      final existingEmployee = await _findEmployeeByEmail(normalized);
+      if (existingEmployee != null) {
+        final doc =
+            existingEmployee['doc'] as QueryDocumentSnapshot<Map<String, dynamic>>;
+        baseData = doc.data();
+        existingUid = baseData['uid'] as String?;
+        await doc.reference.delete();
+      }
+
+      final userSnap = await _db
+          .collection('users')
+          .where('email', isEqualTo: normalized)
+          .limit(1)
+          .get();
+      if (userSnap.docs.isNotEmpty) {
+        final u = userSnap.docs.first.data();
+        existingUid ??= userSnap.docs.first.id;
+        baseData = {
+          ...u,
+          ...baseData,
+          'name': (baseData['name'] ?? u['name'] ?? '').toString(),
+          'phone': (baseData['phone'] ?? u['phone'] ?? '').toString(),
+        };
+      }
+
+      final col = _collectionForRole(role)!;
+      final docRef = existingUid != null
+          ? _db.collection(col).doc(existingUid)
+          : _db.collection(col).doc();
+      final employeeId =
+          (baseData['employeeId'] as String?) ?? _generateEmployeeId(role);
+
+      await docRef.set({
+        ...baseData,
+        'uid': docRef.id,
+        'role': role,
+        'email': normalized,
+        'employeeId': employeeId,
+        'isActive': true,
+        'isBlocked': false,
+        'createdByAdmin': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (baseData['createdAt'] == null)
+          'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       return {
         'success': true,
-        'uid': doc.id,
-        'name': doc.data()['name'] ?? '',
-        'email': email,
-        'role': role,
+        'name': (baseData['name'] ?? '').toString(),
+        'phone': (baseData['phone'] ?? '').toString(),
+        'employeeId': employeeId,
       };
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
   }
 
-  Stream<QuerySnapshot> getUsersByRole(String role) {
-    return _db.collection('users').where('role', isEqualTo: role).snapshots();
+  /// Removes employee role — sets back to 'user' and cleans role collections.
+  Future<void> removeRole(String uid) async {
+    await _removeFromAllRoleCollections(uid);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // CHECK IF USER IS BLOCKED
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<bool> isUserBlocked() async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-    if (isSuperAdmin) return false;
-    try {
-      // Check /employees first, then /users
-      final empDoc = await _db.collection('employees').doc(user.uid).get();
-      if (empDoc.exists) {
-        return empDoc.data()?['isBlocked'] ?? false;
-      }
-      final doc = await _db.collection('users').doc(user.uid).get();
-      return doc.data()?['isBlocked'] ?? false;
-    } catch (_) {
-      return false;
+  /// Whether current admin can perform destructive actions.
+  bool get canPerformDangerousActions {
+    // Extend with your own admin-level check if needed
+    return true;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 4.  ROLE-SPECIFIC COLLECTION SYNC  (private helpers)
+  // ─────────────────────────────────────────────────────────────
+
+  /// Writes / merges a document into the role-specific collection:
+  ///   managers / delivery_agents / staff
+  Future<void> _syncToRoleCollection(
+      String uid, String role, Map<String, dynamic> userData) async {
+    final collectionName = _collectionForRole(role);
+    if (collectionName == null) return;
+
+    final roleData = _buildRoleSpecificData(role, userData);
+    await _db.collection(collectionName).doc(uid).set(
+          {...roleData, 'uid': uid, 'syncedAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
+  }
+
+  Future<void> _removeFromAllRoleCollections(String uid) async {
+    for (final col in ['managers', 'delivery_agents', 'staff']) {
+      try {
+        final doc = await _db.collection(col).doc(uid).get();
+        if (doc.exists) {
+          await _db.collection(col).doc(uid).delete();
+        }
+      } catch (_) {}
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
-  String _routeForRole(UserRole role) {
+  String? _collectionForRole(String role) {
     switch (role) {
-      case UserRole.admin:    return '/admin-dashboard';
-      case UserRole.manager:  return '/manager-dashboard';
-      case UserRole.delivery: return '/delivery-dashboard';
-      case UserRole.staff:    return '/employee-dashboard';
-      default:                return '/dashboard';
+      case 'manager':
+        return 'managers';
+      case 'delivery':
+        return 'delivery_agents';
+      case 'staff':
+        return 'staff';
+      default:
+        return null;
     }
   }
 
-  String _labelForRole(UserRole role) {
+  /// Builds the role-specific subset of fields to store in the role collection.
+  Map<String, dynamic> _buildRoleSpecificData(
+      String role, Map<String, dynamic> userData) {
+    // Common fields present in all role collections
+    final common = {
+      'name': userData['name'] ?? '',
+      'email': userData['email'] ?? '',
+      'phone': userData['phone'] ?? '',
+      'photoURL': userData['photoURL'],
+      'role': role,
+      'isActive': userData['isActive'] ?? true,
+      'isBlocked': userData['isBlocked'] ?? false,
+      'employeeId': userData['employeeId'] ?? _generateEmployeeId(role),
+      'shift': userData['shift'] ?? 'morning',
+      'createdAt': userData['createdAt'],
+      'updatedAt': userData['updatedAt'] ?? FieldValue.serverTimestamp(),
+      'activeOrders': userData['activeOrders'] ?? 0,
+      'completedOrders': userData['completedOrders'] ?? 0,
+      'rating': userData['rating'] ?? 5.0,
+    };
+
     switch (role) {
-      case UserRole.admin:    return 'Admin Dashboard';
-      case UserRole.manager:  return 'Manager Dashboard';
-      case UserRole.delivery: return 'Delivery Dashboard';
-      case UserRole.staff:    return 'Employee Dashboard';
-      default:                return 'User Dashboard';
+      case 'delivery':
+        return {
+          ...common,
+          'isOnline': userData['isOnline'] ?? false,
+          'vehicleType': userData['vehicleType'] ?? 'bike',
+          'vehicleNumber': userData['vehicleNumber'] ?? '',
+          'totalDeliveries': userData['totalDeliveries'] ?? 0,
+          'totalEarnings': userData['totalEarnings'] ?? 0.0,
+          'pendingEarnings': userData['pendingEarnings'] ?? 0.0,
+        };
+
+      case 'manager':
+        return {
+          ...common,
+          'branchId': userData['branchId'] ?? '',
+          'managedStaffCount': userData['managedStaffCount'] ?? 0,
+        };
+
+      case 'staff':
+        return {
+          ...common,
+          'department': userData['department'] ?? 'general',
+          'employeeId': userData['employeeId'] ?? _generateEmployeeId('staff'),
+        };
+
+      default:
+        return common;
     }
   }
 
-  IconData _iconForRole(UserRole role) {
-    switch (role) {
-      case UserRole.admin:    return Icons.admin_panel_settings_rounded;
-      case UserRole.manager:  return Icons.manage_accounts_rounded;
-      case UserRole.delivery: return Icons.delivery_dining_rounded;
-      case UserRole.staff:    return Icons.badge_rounded;
-      default:                return Icons.person_rounded;
-    }
+  // ─────────────────────────────────────────────────────────────
+  // 5.  UTILITIES
+  // ─────────────────────────────────────────────────────────────
+
+  String _generateEmployeeId(String role) {
+    final prefix = role == 'delivery'
+        ? 'DLV'
+        : role == 'manager'
+            ? 'MGR'
+            : 'STF';
+    return '$prefix${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
   }
 
-  Color _colorForRole(UserRole role) {
-    switch (role) {
-      case UserRole.admin:    return const Color(0xFF080F1E);
-      case UserRole.manager:  return const Color(0xFF7C3AED);
-      case UserRole.delivery: return const Color(0xFF0EA5E9);
-      case UserRole.staff:    return const Color(0xFF059669);
-      default:                return const Color(0xFF1B4FD8);
-    }
+  /// Shows a role-picker dialog when a user has multiple roles.
+  Future<String?> showRoleSelectionDialog(BuildContext context) async {
+    final routes = await getUserAccessibleRoles();
+    if (routes.length == 1) return routes.first;
+
+    // Guard against stale context after async gap
+    if (!context.mounted) return null;
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Choose your role'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: routes
+              .map((r) => ListTile(
+                    title: Text(_labelForRoute(r)),
+                    onTap: () => Navigator.pop(ctx, r),
+                  ))
+              .toList(),
+        ),
+      ),
+    );
   }
 
-  UserRole _parseRole(String roleStr) {
-    switch (roleStr.toLowerCase()) {
-      case 'admin':    return UserRole.admin;
-      case 'manager':  return UserRole.manager;
-      case 'delivery': return UserRole.delivery;
-      case 'staff':    return UserRole.staff;
-      default:         return UserRole.user;
+  String _labelForRoute(String route) {
+    switch (route) {
+      case '/admin-dashboard':
+        return 'Admin';
+      case '/manager-dashboard':
+        return 'Manager';
+      case '/delivery-dashboard':
+        return 'Delivery Agent';
+      case '/employee-dashboard':
+        return 'Staff';
+      default:
+        return 'Customer';
     }
   }
 }

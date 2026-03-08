@@ -238,7 +238,7 @@ class SavedAddressesPage extends StatelessWidget {
                         duration: const Duration(milliseconds: 200),
                         width: 24, height: 24,
                         decoration: BoxDecoration(shape: BoxShape.circle, color: isDefault ? _gold : Colors.white.withValues(alpha: 0.1), border: Border.all(color: isDefault ? _gold : Colors.white.withValues(alpha: 0.3))),
-                        child: isDefault ? const Icon(Icons.check_rounded, color: Colors.black, size: 14) : null,
+                        child: isDefault ? const Icon(Icons.check_rounded, color: Colors.white, size: 14) : null,
                       ),
                     ]),
                   ),
@@ -263,7 +263,7 @@ class SavedAddressesPage extends StatelessWidget {
                       );
                       if (ctx2.mounted) Navigator.pop(ctx2);
                     },
-                    child: isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('SAVE ADDRESS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                    child: isLoading ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('SAVE ADDRESS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -354,7 +354,7 @@ class _AddressCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(children: [
-                        Text(nick, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                        Text(nick, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: t.textHi)),
                         if (isDefault) ...[
                           const SizedBox(width: 8),
                           Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: _gold.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)), child: const Text('DEFAULT', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: _gold, letterSpacing: 1))),

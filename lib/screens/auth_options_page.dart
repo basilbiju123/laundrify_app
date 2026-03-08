@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
-import '../services/role_based_auth_service.dart';
 import 'location_page.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
@@ -68,7 +66,6 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
   }
 
   final AuthService _authService = AuthService();
-  final RoleBasedAuthService _roleService = RoleBasedAuthService();
 
   /// Returns true if running on a desktop platform (Windows, macOS, Linux)
   bool get _isDesktop {
@@ -99,45 +96,33 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
       if (!mounted) return;
 
       if (result['success'] == true) {
-        if (result['hasMultipleRoles'] == true) {
-          final selectedRoute =
-              await _roleService.showRoleSelectionDialog(context);
+        final accessibleRoles = (result['accessibleRoles'] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [result['route'] as String? ?? '/dashboard'];
+
+        if (result['hasMultipleRoles'] == true && accessibleRoles.length > 1) {
+          // ── Admin / multi-role: show the beautiful dashboard picker ────
+          if (!mounted) return;
+          final selectedRoute = await Navigator.push<String>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => _AdminDashboardPickerPage(
+                accessibleRoutes: accessibleRoles,
+                userEmail: FirebaseAuth.instance.currentUser?.email ?? '',
+                userName: FirebaseAuth.instance.currentUser?.displayName ?? '',
+                userPhoto: FirebaseAuth.instance.currentUser?.photoURL,
+              ),
+            ),
+          );
           if (selectedRoute != null && mounted) {
-            // Persist choice so next login auto-routes here
-            final prefs = await SharedPreferences.getInstance();
-            final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-            await prefs.setString('last_dashboard_$uid', selectedRoute);
-            _navigateToDashboard(selectedRoute);
+            _navigateToRoute(selectedRoute);
           }
         } else {
-          final route = result['route'] as String;
-          if (route == '/dashboard') {
-            final user = FirebaseAuth.instance.currentUser;
-            bool hasLocation = false;
-            if (user != null) {
-              try {
-                final doc = await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user.uid)
-                    .get();
-                final data = doc.data();
-                hasLocation = data != null &&
-                    data['location'] != null &&
-                    data['location']['latitude'] != null;
-              } catch (_) {}
-            }
-            if (!mounted) return;
-            // Only show LocationPage if this is a brand-new user AND no location saved
-            final isNewUser = result['isNewUser'] == true;
-            if (!hasLocation && isNewUser) {
-              Navigator.pushReplacement(context,
-                  MaterialPageRoute(builder: (_) => const LocationPage()));
-            } else {
-              _navigateToDashboard(route);
-            }
-          } else {
-            _navigateToDashboard(route);
-          }
+          // ── Single role — direct routing ────────────────────────────
+          final route = result['route'] as String? ?? '/dashboard';
+          if (!mounted) return;
+          _navigateToRoute(route);
         }
       } else {
         if (mounted) {
@@ -166,6 +151,42 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  /// Central navigation helper.
+  /// - /dashboard (user role) → check location → LocationPage or Dashboard
+  /// - any other role → go directly to that dashboard
+  Future<void> _navigateToRoute(String route) async {
+    if (!mounted) return;
+
+    if (route == '/dashboard') {
+      // Check if user has already saved a location
+      final user = FirebaseAuth.instance.currentUser;
+      bool hasLocation = false;
+      if (user != null) {
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          final data = doc.data();
+          hasLocation = data != null &&
+              data['location'] != null &&
+              data['location']['latitude'] != null;
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      if (!hasLocation) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LocationPage()),
+        );
+      } else {
+        _navigateToDashboard(route);
+      }
+      return;
+    }
+    _navigateToDashboard(route);
   }
 
   void _navigateToDashboard(String route) {
@@ -722,4 +743,308 @@ class _AuthOptionsPageState extends State<AuthOptionsPage>
             ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADMIN DASHBOARD PICKER — Full-screen selector shown to admins on sign-in
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _AdminDashboardPickerPage extends StatefulWidget {
+  final List<String> accessibleRoutes;
+  final String userEmail;
+  final String userName;
+  final String? userPhoto;
+
+  const _AdminDashboardPickerPage({
+    required this.accessibleRoutes,
+    required this.userEmail,
+    required this.userName,
+    this.userPhoto,
+  });
+
+  @override
+  State<_AdminDashboardPickerPage> createState() =>
+      _AdminDashboardPickerPageState();
+}
+
+class _AdminDashboardPickerPageState extends State<_AdminDashboardPickerPage>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animCtrl;
+  int? _hoveredIndex;
+
+  static const _navy  = Color(0xFF080F1E);
+  static const _navyM = Color(0xFF0D1A2E);
+  static const _navyC = Color(0xFF111F35);
+  static const _navyB = Color(0xFF1C2F4A);
+  static const _gold  = Color(0xFFF5C518);
+  static const _goldS = Color(0xFFFDE68A);
+  static const _textHi = Color(0xFFF1F5F9);
+  static const _textMd = Color(0xFF94A3B8);
+
+  static const _dashboards = [
+    _DashInfo(
+      route: '/admin-dashboard',
+      label: 'Admin Panel',
+      sub: 'Full control — users, orders, analytics, employees',
+      icon: Icons.admin_panel_settings_rounded,
+      gradStart: Color(0xFFF5C518),
+      gradEnd: Color(0xFFFFB300),
+    ),
+    _DashInfo(
+      route: '/manager-dashboard',
+      label: 'Manager',
+      sub: 'Branch management — staff, orders, revenue',
+      icon: Icons.manage_accounts_rounded,
+      gradStart: Color(0xFF4FC3F7),
+      gradEnd: Color(0xFF0288D1),
+    ),
+    _DashInfo(
+      route: '/delivery-dashboard',
+      label: 'Delivery',
+      sub: 'Driver view — live map, pickups, earnings',
+      icon: Icons.delivery_dining_rounded,
+      gradStart: Color(0xFF81C784),
+      gradEnd: Color(0xFF2E7D32),
+    ),
+    _DashInfo(
+      route: '/employee-dashboard',
+      label: 'Employee',
+      sub: 'Staff view — laundry tasks, queue, schedule',
+      icon: Icons.badge_rounded,
+      gradStart: Color(0xFFCE93D8),
+      gradEnd: Color(0xFF7B1FA2),
+    ),
+    _DashInfo(
+      route: '/dashboard',
+      label: 'User / Customer',
+      sub: 'Customer app — book orders, track, profile',
+      icon: Icons.person_rounded,
+      gradStart: Color(0xFFFF8A65),
+      gradEnd: Color(0xFFE64A19),
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 700));
+    _animCtrl.forward();
+  }
+
+  @override
+  void dispose() { _animCtrl.dispose(); super.dispose(); }
+
+  List<_DashInfo> get _available => _dashboards
+      .where((d) => widget.accessibleRoutes.contains(d.route))
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width > 700;
+
+    return Scaffold(
+      backgroundColor: _navy,
+      body: Stack(children: [
+        // Background
+        Positioned.fill(
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0, -0.4),
+                radius: 1.2,
+                colors: [Color(0xFF0E2147), _navy],
+              ),
+            ),
+          ),
+        ),
+
+        SafeArea(child: Column(children: [
+          // ── Header ─────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+            child: Column(children: [
+              // Super-admin gold badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [_gold, _goldS],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [BoxShadow(
+                      color: _gold.withValues(alpha: 0.45),
+                      blurRadius: 18, offset: const Offset(0, 4))],
+                ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.shield_rounded, color: _navy, size: 15),
+                  SizedBox(width: 7),
+                  Text('SUPER ADMIN ACCESS', style: TextStyle(
+                      color: _navy, fontWeight: FontWeight.w900,
+                      fontSize: 11, letterSpacing: 1.5)),
+                ]),
+              ),
+
+              const SizedBox(height: 22),
+
+              // User info row
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                if (widget.userPhoto != null)
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundImage: NetworkImage(widget.userPhoto!),
+                    backgroundColor: _navyB,
+                  )
+                else
+                  Container(
+                    width: 52, height: 52,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(colors: [_gold, _goldS]),
+                    ),
+                    child: const Icon(Icons.person, color: _navy, size: 28),
+                  ),
+                const SizedBox(width: 14),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    widget.userName.isNotEmpty ? widget.userName : 'Admin',
+                    style: const TextStyle(
+                        color: _textHi, fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                  Text(widget.userEmail,
+                      style: const TextStyle(color: _textMd, fontSize: 12)),
+                ]),
+              ]),
+
+              const SizedBox(height: 22),
+              const Text('Choose a Dashboard', style: TextStyle(
+                  color: _textHi, fontSize: 24, fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3)),
+              const SizedBox(height: 4),
+              const Text('Tap any dashboard to enter',
+                  style: TextStyle(color: _textMd, fontSize: 13)),
+            ]),
+          ),
+
+          // Divider
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+            height: 1,
+            decoration: BoxDecoration(gradient: LinearGradient(colors: [
+              Colors.transparent,
+              _gold.withValues(alpha: 0.4),
+              Colors.transparent,
+            ])),
+          ),
+
+          // ── Cards ──────────────────────────────────────────────────
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: isWide ? _buildGrid() : _buildList(),
+            ),
+          ),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _buildGrid() {
+    final items = _available;
+    return GridView.builder(
+      padding: const EdgeInsets.only(bottom: 24),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2, crossAxisSpacing: 14,
+        mainAxisSpacing: 14, childAspectRatio: 2.7,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) => _card(items[i], i),
+    );
+  }
+
+  Widget _buildList() {
+    final items = _available;
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 24),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) => _card(items[i], i),
+    );
+  }
+
+  Widget _card(_DashInfo info, int index) {
+    final delay = index * 0.10;
+    return AnimatedBuilder(
+      animation: _animCtrl,
+      builder: (_, child) {
+        final t = ((_animCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+        final c = Curves.easeOutCubic.transform(t);
+        return Opacity(
+          opacity: c,
+          child: Transform.translate(offset: Offset(0, 28 * (1 - c)), child: child),
+        );
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hoveredIndex = index),
+        onExit:  (_) => setState(() => _hoveredIndex = null),
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context, info.route),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: _hoveredIndex == index ? _navyC : _navyM,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: _hoveredIndex == index
+                    ? info.gradStart.withValues(alpha: 0.6) : _navyB,
+                width: _hoveredIndex == index ? 1.5 : 1,
+              ),
+              boxShadow: _hoveredIndex == index ? [BoxShadow(
+                  color: info.gradStart.withValues(alpha: 0.22),
+                  blurRadius: 20, offset: const Offset(0, 6))] : [],
+            ),
+            child: Row(children: [
+              Container(
+                width: 46, height: 46,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                      colors: [info.gradStart, info.gradEnd],
+                      begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(
+                      color: info.gradStart.withValues(alpha: 0.38),
+                      blurRadius: 10, offset: const Offset(0, 3))],
+                ),
+                child: Icon(info.icon, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(info.label, style: const TextStyle(
+                    color: _textHi, fontSize: 15, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 2),
+                Text(info.sub, style: const TextStyle(
+                    color: _textMd, fontSize: 11, height: 1.3)),
+              ])),
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_forward_ios_rounded,
+                  color: _textMd.withValues(alpha: 0.45), size: 14),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashInfo {
+  final String route, label, sub;
+  final IconData icon;
+  final Color gradStart, gradEnd;
+  const _DashInfo({
+    required this.route, required this.label, required this.sub,
+    required this.icon, required this.gradStart, required this.gradEnd,
+  });
 }

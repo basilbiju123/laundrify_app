@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 
 class TrackOrderPage extends StatefulWidget {
@@ -432,6 +433,30 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
                         ),
                       ],
 
+
+                      // LIVE DRIVER LOCATION MAP
+                      // Shows when driver is online and has shared location.
+                      // Uses OpenStreetMap static tiles — completely free, no API key.
+                      if (order['currentLat'] != null &&
+                          order['currentLng'] != null &&
+                          (status == 'delivery' || status == 'out_for_delivery' ||
+                           status == 'pickup')) ...[ 
+                        const SizedBox(height: 24),
+                        Text(
+                          'Driver Location',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: t.textHi,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _LiveMapCard(
+                          lat: (order['currentLat'] as num).toDouble(),
+                          lng: (order['currentLng'] as num).toDouble(),
+                        ),
+                      ],
+
                       // ORDER DETAILS
                       const SizedBox(height: 24),
                       Text(
@@ -507,6 +532,121 @@ class _TrackOrderPageState extends State<TrackOrderPage> {
       return '${dt.day}/${dt.month}/${dt.year}';
     }
     return val.toString();
+  }
+}
+
+
+/// Shows a static OpenStreetMap tile centred on the driver's current GPS position.
+/// Tapping opens Google Maps / Apple Maps with directions.
+/// OpenStreetMap tiles are free — no API key required.
+class _LiveMapCard extends StatelessWidget {
+  final double lat;
+  final double lng;
+  const _LiveMapCard({required this.lat, required this.lng});
+
+  static const _navy = Color(0xFF080F1E);
+  static const _gold = Color(0xFFF5C518);
+
+  String _tileUrl() {
+    // OpenStreetMap static map via staticmap.openstreetmap.de — free, no key
+    return 'https://staticmap.openstreetmap.de/staticmap.php'
+        '?center=$lat,$lng&zoom=15&size=600x220'
+        '&markers=$lat,$lng,red-pushpin';
+  }
+
+  Future<void> _openMaps() async {
+    final uri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openMaps,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            Image.network(
+              _tileUrl(),
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              loadingBuilder: (_, child, progress) => progress == null
+                  ? child
+                  : Container(
+                      height: 180,
+                      color: const Color(0xFFE8EDF5),
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                            color: _gold, strokeWidth: 2),
+                      ),
+                    ),
+              errorBuilder: (_, __, ___) => Container(
+                height: 180,
+                color: const Color(0xFFE8EDF5),
+                child: const Center(
+                  child: Text('Map unavailable',
+                      style: TextStyle(color: Color(0xFF94A3B8))),
+                ),
+              ),
+            ),
+            // "Open in Maps" pill
+            Positioned(
+              bottom: 10,
+              right: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _navy.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.open_in_new_rounded,
+                        color: _gold, size: 13),
+                    SizedBox(width: 4),
+                    Text('Open in Maps',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ),
+            // Live indicator dot
+            Positioned(
+              top: 10,
+              left: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, color: Colors.white, size: 8),
+                    SizedBox(width: 5),
+                    Text('Live',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
